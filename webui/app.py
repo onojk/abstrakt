@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import psutil
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, Response, jsonify, render_template, request
 import subprocess
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
@@ -303,21 +303,30 @@ def download(job_id):
     if not os.path.isfile(job.output_path):
         return jsonify({"error": "Output file missing"}), 500
 
-    job_dir = job.job_dir
+    out_path = job.output_path
+    job_dir  = job.job_dir
+    fname    = f"abstrakt_{job_id[:8]}.mp4"
+    filesize = os.path.getsize(out_path)
 
-    def _cleanup():
-        shutil.rmtree(job_dir, ignore_errors=True)
-        with _jobs_lock:
-            jobs.pop(job_id, None)
+    def _stream():
+        try:
+            with open(out_path, "rb") as fh:
+                while True:
+                    chunk = fh.read(65536)
+                    if not chunk:
+                        break
+                    yield chunk
+        finally:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            with _jobs_lock:
+                jobs.pop(job_id, None)
 
-    resp = send_file(
-        job.output_path,
-        as_attachment=True,
-        download_name=f"abstrakt_{job_id[:8]}.mp4",
-        mimetype="video/mp4",
-    )
-    resp.call_on_close(_cleanup)
-    return resp
+    headers = {
+        "Content-Disposition": f'attachment; filename="{fname}"',
+        "Content-Length": str(filesize),
+        "Content-Type": "video/mp4",
+    }
+    return Response(_stream(), status=200, headers=headers)
 
 
 @app.route("/server_load")
