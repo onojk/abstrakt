@@ -18,14 +18,15 @@ AUDIO_FILE = sys.argv[1] if len(sys.argv) > 1 else "soundtrack.wav"
 OUT_FILE   = sys.argv[2] if len(sys.argv) > 2 else "output.mp4"
 
 # ------------ Field params ------------
-GRID_SPACING = 48
-DOT_BASE_RADIUS = 4
-DOT_MAX_BOOST = 5
-NUM_INFLUENCERS = 12
-INFLUENCE_RADIUS = 260.0
-FALLOFF_POWER = 2.2
-BASE_STRENGTH = 1.0
-SWIRL_TWIST = 1.4
+SCALE            = WIDTH / 1920.0
+GRID_SPACING     = max(12, int(48  * SCALE))  # geometry: scales with resolution
+INFLUENCE_RADIUS = 260.0 * SCALE              # geometry: scales with resolution
+DOT_BASE_RADIUS  = 4                          # visual: kept absolute for kaleido visibility
+DOT_MAX_BOOST    = 5                          # visual: kept absolute
+NUM_INFLUENCERS  = 12
+FALLOFF_POWER    = 2.2
+BASE_STRENGTH    = 1.0
+SWIRL_TWIST      = 1.4
 
 # disable window; render to surfaces
 os.environ["SDL_VIDEODRIVER"] = "dummy"
@@ -281,7 +282,7 @@ while True:
         for inf in INFLUENCERS:
             fx, fy, mag = inf.field(px, py)
             fx_sum += fx; fy_sum += fy; mag_sum += mag
-        speed = 90.0 + 150.0 * energy + 220.0 * feat["flux"]
+        speed = (90.0 + 150.0 * energy + 220.0 * feat["flux"]) * SCALE
         px += fx_sum * speed / FPS
         py += fy_sum * speed / FPS
         # soft home spring
