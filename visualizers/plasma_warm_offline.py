@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-# plasma_warm_offline.py — Plasma visualizer with sepia + slow rainbow colorize.
+# plasma_warm_offline.py — Plasma visualizer with sepia + slow rainbow colorize + contrast.
 # Same plasma generation as plasma_offline.py; adds per-frame color transforms:
 #   1. Sepia matrix wash (warm desaturation)
 #   2. HSV colorize cycle — full rainbow every 60 s, blended at 50%
+#   3. 4-pass contrast crush — Kdenlive "100% contrast" applied 4× in series
 # Outputs video-only H.264; abstrakt.sh step 4 handles audio muxing.
 
 from __future__ import annotations
@@ -50,6 +51,10 @@ COLORIZE_BLEND = 0.50
 
 # Seconds per full hue cycle
 HUE_CYCLE_SECS = 60.0
+
+# Contrast crush — Kdenlive "100% contrast" equivalent; 4 passes applied in series
+_CONTRAST_GAIN   = 2.0   # gain per pass; reduce to 1.5 if too destructive
+_CONTRAST_PASSES = 4
 
 
 # ------------ Plasma generator (verbatim) ------------
@@ -151,6 +156,18 @@ def apply_warm(rgb: np.ndarray, frame_num: int) -> np.ndarray:
     return np.clip(result, 0.0, 255.0).astype(np.uint8)
 
 
+# ------------ Contrast crush ------------
+
+def apply_contrast(rgb: np.ndarray) -> np.ndarray:
+    """Apply Kdenlive 100% contrast _CONTRAST_PASSES times in series.
+    Each pass: out = clip((in - 128) * gain + 128, 0, 255).
+    Clamp to [0,255] between passes so they compose correctly."""
+    f = rgb.astype(np.float32)
+    for _ in range(_CONTRAST_PASSES):
+        f = np.clip((f - 128.0) * _CONTRAST_GAIN + 128.0, 0.0, 255.0)
+    return f.astype(np.uint8)
+
+
 # ------------ ffmpeg writer (video-only H.264) ------------
 
 ffmpeg_cmd = [
@@ -197,6 +214,7 @@ for frame_num in range(total_frames):
 
     arr  = generate_plasma(t, bass_v, mid_v, high_v)
     arr  = apply_warm(arr, frame_num)
+    arr  = apply_contrast(arr)
     arr  = np.ascontiguousarray(arr, dtype=np.uint8)
     proc.stdin.write(arr.tobytes())
 
