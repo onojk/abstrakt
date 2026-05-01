@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Abstrakt</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", system-ui, sans-serif;
+    background: #0d0d0d;
+    color: #e8e8e8;
+    margin: 0;
+    padding: 2rem 1rem;
+    min-height: 100vh;
+  }
+  h1 { font-size: 1.8rem; margin: 0 0 0.25rem; letter-spacing: 0.04em; }
+  .tagline { color: #888; margin: 0 0 2rem; font-size: 0.9rem; }
+  .card {
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    padding: 1.5rem;
+    max-width: 560px;
+    margin: 0 auto 1.5rem;
+  }
+  label { display: block; font-size: 0.85rem; color: #aaa; margin-bottom: 0.35rem; }
+  .field { margin-bottom: 1.1rem; }
+  input[type="file"],
+  input[type="number"],
+  select {
+    width: 100%;
+    background: #111;
+    color: #e8e8e8;
+    border: 1px solid #333;
+    border-radius: 5px;
+    padding: 0.55rem 0.7rem;
+    font-size: 0.95rem;
+  }
+  input[type="file"] { cursor: pointer; }
+  input[type="number"] { -moz-appearance: textfield; }
+  button {
+    width: 100%;
+    padding: 0.7rem;
+    font-size: 1rem;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: opacity 0.15s;
+  }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  #btn-render  { background: #7b4fd6; color: #fff; }
+  #btn-cancel  { background: #333; color: #ccc; margin-top: 0.6rem; display: none; }
+  #btn-new     { background: #1e4d2b; color: #aff5c0; margin-top: 0.6rem; display: none; }
+  /* progress */
+  .progress-area { display: none; margin-top: 1.2rem; }
+  progress {
+    width: 100%; height: 14px;
+    -webkit-appearance: none; appearance: none;
+    border-radius: 7px; overflow: hidden; border: none;
+  }
+  progress::-webkit-progress-bar        { background: #222; border-radius: 7px; }
+  progress::-webkit-progress-value      { background: #7b4fd6; border-radius: 7px; transition: width 0.4s; }
+  progress::-moz-progress-bar           { background: #7b4fd6; border-radius: 7px; }
+  #step-text  { font-size: 0.82rem; color: #888; margin-top: 0.4rem; min-height: 1.2em; }
+  #status-msg { margin-top: 0.6rem; font-size: 0.9rem; min-height: 1.1em; }
+  .ok   { color: #7fe0a0; }
+  .err  { color: #e07070; }
+  /* download link */
+  #dl-link {
+    display: none;
+    margin-top: 0.8rem;
+    text-align: center;
+    padding: 0.65rem;
+    background: #1e4d2b;
+    border-radius: 5px;
+    color: #aff5c0;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+  #dl-link:hover { background: #2a6840; }
+  /* log */
+  details { margin-top: 1rem; }
+  summary { cursor: pointer; font-size: 0.82rem; color: #666; user-select: none; }
+  summary:hover { color: #999; }
+  #log-pre {
+    font-family: "Courier New", monospace;
+    font-size: 0.75rem;
+    background: #111;
+    border: 1px solid #222;
+    border-radius: 4px;
+    padding: 0.7rem;
+    max-height: 220px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: #9a9a9a;
+    margin-top: 0.5rem;
+  }
+  /* server load */
+  #load-bar {
+    font-size: 0.72rem;
+    color: #555;
+    text-align: right;
+    max-width: 560px;
+    margin: 0 auto;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Abstrakt</h1>
+  <p class="tagline">Audio-reactive symmetric music video generator</p>
+
+  <form id="render-form" enctype="multipart/form-data">
+    <div class="field">
+      <label for="audio">Audio file (MP3, WAV, FLAC — max 100 MB)</label>
+      <input type="file" id="audio" name="audio" accept="audio/*" required>
+    </div>
+
+    <div class="field">
+      <label for="visualizer">Visualizer</label>
+      <select id="visualizer" name="visualizer">
+        {% for v in visualizers %}
+        <option value="{{ v }}">{{ v }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="resolution">Resolution</label>
+      <select id="resolution" name="resolution">
+        {% for r in resolutions %}
+        <option value="{{ r }}" {% if r == "1080p" %}selected{% endif %}>{{ r }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="duration">Duration (seconds, 0 = full track)</label>
+      <input type="number" id="duration" name="duration" value="30" min="0" max="600">
+    </div>
+
+    <button type="submit" id="btn-render">Render</button>
+    <button type="button" id="btn-cancel">Cancel</button>
+    <button type="button" id="btn-new">Start New Render</button>
+  </form>
+
+  <div class="progress-area" id="progress-area">
+    <progress id="prog-bar" value="0" max="100"></progress>
+    <div id="step-text"></div>
+  </div>
+
+  <div id="status-msg"></div>
+  <a id="dl-link" href="#" download>Download video</a>
+
+  <details id="log-details">
+    <summary>Show log</summary>
+    <pre id="log-pre"></pre>
+  </details>
+</div>
+
+<div id="load-bar">CPU —% &nbsp;|&nbsp; MEM —%</div>
+
+<script>
+'use strict';
+
+const form       = document.getElementById('render-form');
+const btnRender  = document.getElementById('btn-render');
+const btnCancel  = document.getElementById('btn-cancel');
+const btnNew     = document.getElementById('btn-new');
+const progArea   = document.getElementById('progress-area');
+const progBar    = document.getElementById('prog-bar');
+const stepText   = document.getElementById('step-text');
+const statusMsg  = document.getElementById('status-msg');
+const dlLink     = document.getElementById('dl-link');
+const logPre     = document.getElementById('log-pre');
+const loadBar    = document.getElementById('load-bar');
+
+let currentJobId  = null;
+let pollTimer     = null;
+let logTimer      = null;
+let loadTimer     = null;
+
+function stopPolling() {
+  clearTimeout(pollTimer);
+  clearTimeout(logTimer);
+  pollTimer = null;
+  logTimer  = null;
+}
+
+function setFormLocked(locked) {
+  btnRender.disabled = locked;
+  form.querySelectorAll('input,select').forEach(el => el.disabled = locked);
+}
+
+function showStatus(msg, cls) {
+  statusMsg.textContent = msg;
+  statusMsg.className   = cls || '';
+}
+
+function resetUI() {
+  stopPolling();
+  currentJobId = null;
+  setFormLocked(false);
+  progArea.style.display = 'none';
+  progBar.value   = 0;
+  stepText.textContent   = '';
+  statusMsg.textContent  = '';
+  statusMsg.className    = '';
+  dlLink.style.display   = 'none';
+  dlLink.href            = '#';
+  logPre.textContent     = '';
+  btnCancel.style.display = 'none';
+  btnNew.style.display    = 'none';
+}
+
+function pollStatus() {
+  if (!currentJobId) return;
+  fetch(`/job_status/${currentJobId}`)
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) { showStatus(data.error, 'err'); stopPolling(); return; }
+
+      progBar.value          = data.progress;
+      stepText.textContent   = data.step_text;
+
+      if (data.status === 'done') {
+        stopPolling();
+        progBar.value          = 100;
+        stepText.textContent   = 'Complete';
+        showStatus('Render complete!', 'ok');
+        dlLink.href            = `/download/${currentJobId}`;
+        dlLink.style.display   = 'block';
+        btnCancel.style.display = 'none';
+        btnNew.style.display    = 'inline-block';
+        return;
+      }
+      if (data.status === 'failed') {
+        stopPolling();
+        showStatus('Render failed: ' + (data.error || 'unknown error'), 'err');
+        btnCancel.style.display = 'none';
+        btnNew.style.display    = 'inline-block';
+        return;
+      }
+      if (data.status === 'cancelled') {
+        stopPolling();
+        showStatus('Render cancelled.', '');
+        btnCancel.style.display = 'none';
+        btnNew.style.display    = 'inline-block';
+        return;
+      }
+      pollTimer = setTimeout(pollStatus, 1500);
+    })
+    .catch(() => { pollTimer = setTimeout(pollStatus, 3000); });
+}
+
+function pollLog() {
+  if (!currentJobId) return;
+  fetch(`/job_log/${currentJobId}`)
+    .then(r => r.text())
+    .then(text => {
+      logPre.textContent = text;
+      if (document.getElementById('log-details').open) {
+        logPre.scrollTop = logPre.scrollHeight;
+      }
+    })
+    .catch(() => {})
+    .finally(() => { logTimer = setTimeout(pollLog, 2000); });
+}
+
+function pollLoad() {
+  fetch('/server_load')
+    .then(r => r.json())
+    .then(d => {
+      loadBar.textContent =
+        `CPU ${d.cpu_percent.toFixed(0)}%  |  MEM ${d.mem_percent.toFixed(0)}%`;
+    })
+    .catch(() => {})
+    .finally(() => { loadTimer = setTimeout(pollLoad, 5000); });
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  resetUI();
+
+  const fd = new FormData(form);
+  showStatus('Uploading...', '');
+  setFormLocked(true);
+  progArea.style.display = 'block';
+  progBar.value = 2;
+  stepText.textContent = 'Uploading...';
+  btnCancel.style.display = 'inline-block';
+
+  let resp;
+  try {
+    resp = await fetch('/start_render', { method: 'POST', body: fd });
+  } catch (err) {
+    showStatus('Network error: ' + err.message, 'err');
+    setFormLocked(false);
+    btnCancel.style.display = 'none';
+    return;
+  }
+
+  const data = await resp.json();
+  if (!resp.ok) {
+    showStatus((data.error || 'Server error'), 'err');
+    setFormLocked(false);
+    btnCancel.style.display = 'none';
+    progArea.style.display  = 'none';
+    return;
+  }
+
+  currentJobId = data.job_id;
+  showStatus('');
+  pollStatus();
+  pollLog();
+});
+
+btnCancel.addEventListener('click', () => {
+  if (!currentJobId) return;
+  fetch(`/cancel/${currentJobId}`, { method: 'POST' })
+    .then(r => r.json())
+    .then(() => { showStatus('Cancelling...', ''); })
+    .catch(() => {});
+});
+
+btnNew.addEventListener('click', () => { resetUI(); });
+
+dlLink.addEventListener('click', () => {
+  // After download starts, clear job from memory on close side.
+  // Disable button to prevent double-download.
+  setTimeout(() => { dlLink.style.display = 'none'; }, 500);
+});
+
+// Start server load polling
+pollLoad();
+</script>
+</body>
+</html>
