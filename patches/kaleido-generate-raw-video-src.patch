@@ -1,5 +1,5 @@
 diff --git a/scripts/generate.sh b/scripts/generate.sh
-index e6e9f2d8..f59260f6 100755
+index e6e9f2d8..f7906eb6 100755
 --- a/scripts/generate.sh
 +++ b/scripts/generate.sh
 @@ -73,6 +73,7 @@ fi
@@ -19,7 +19,7 @@ index e6e9f2d8..f59260f6 100755
  # -------------------- step 1: build base image --------------------
  _T=$SECONDS
  if [[ "$REUSE_BASE" = "1" && -f "$TMP/base.jpg" ]]; then
-@@ -248,10 +251,28 @@ echo "[TIMING] Step 5 done in $(( SECONDS - _T ))s"
+@@ -248,11 +251,39 @@ echo "[TIMING] Step 5 done in $(( SECONDS - _T ))s"
  _T=$SECONDS; echo "[STEP 6/8] Concatenating ${TOTAL_SEGS} segments → pan_final.mp4..."
  run_or_echo ffmpeg -y -loglevel warning -f concat -safe 0 -i "$CONCAT_LIST" -c copy "$TMP/pan_final.mp4"
  echo "[TIMING] Step 6 done in $(( SECONDS - _T ))s"
@@ -42,11 +42,40 @@ index e6e9f2d8..f59260f6 100755
 +  TOTAL_W=0; SEG_LEN=0; LOOPS=0; TOTAL_SEGS=0; SKIP_SWIRL=1
 +
 +fi # end RAW_VIDEO_SRC bypass
++
++# Returns 0 if frei0r kaleid0sc0pe is usable, 1 otherwise
++_frei0r_available() {
++  ffmpeg -hide_banner -filters 2>/dev/null | grep -iq "kaleid" && return 0
++  local _p
++  for _p in /usr/lib/frei0r-1/kaleid0sc0pe.so /usr/local/lib/frei0r-1/kaleid0sc0pe.so; do
++    [[ -f "$_p" ]] && return 0
++  done
++  return 1
++}
  
  _T=$SECONDS; echo "[STEP 7/8] Applying effects and writing output..."
 -# -------------------- step 3: optional Frei0r radial kaleidoscope --------------------
 -SOURCE_FOR_MANDALA="$TMP/pan_final.mp4"
+-if ffmpeg -hide_banner -filters 2>/dev/null | grep -q "frei0r"; then
 +# -------------------- optional Frei0r radial kaleidoscope --------------------
- if ffmpeg -hide_banner -filters 2>/dev/null | grep -q "frei0r"; then
++if _frei0r_available; then
    if [[ "$APPLY_KDEN" = "1" ]]; then
      log "🧪 Applying Frei0r radial kaleid0sc0pe (${KALEIDO_SIDES} wedges)…"
+     run_or_echo ffmpeg -y -loglevel warning -i "$TMP/pan_final.mp4" \
+@@ -330,16 +361,6 @@ echo "[TIMING] Step 7 done in $(( SECONDS - _T ))s"
+ KALEIDO_APPLIED=0
+ _T=$SECONDS; echo "[STEP 8/8] Applying frei0r kaleidoscope (${KALEIDO_SIDES} sides) to final output..."
+ 
+-# Returns 0 if frei0r kaleid0sc0pe is usable, 1 otherwise
+-_frei0r_available() {
+-  ffmpeg -hide_banner -filters 2>/dev/null | grep -iq "kaleid" && return 0
+-  local _p
+-  for _p in /usr/lib/frei0r-1/kaleid0sc0pe.so /usr/local/lib/frei0r-1/kaleid0sc0pe.so; do
+-    [[ -f "$_p" ]] && return 0
+-  done
+-  return 1
+-}
+-
+ if ! _frei0r_available; then
+   echo "[INFO] frei0r not found — attempting: sudo apt-get install -y frei0r-plugins"
+   if [[ "$DRY_RUN" = "1" ]]; then
