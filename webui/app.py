@@ -20,7 +20,7 @@ JOBS_DIR    = os.path.join(REPO_ROOT, "jobs")
 
 # ── Config ────────────────────────────────────────────────────────────────────
 RESOLUTION_PRESETS = {
-    "480p":  {"width": 854,  "height": 480,  "crf": 32, "preset": "ultrafast", "fps": 24},
+    "480p":  {"width": 852,  "height": 480,  "crf": 32, "preset": "ultrafast", "fps": 24},
     "1080p": {"width": 1920, "height": 1080, "crf": 18, "preset": "medium",    "fps": 30},
 }
 
