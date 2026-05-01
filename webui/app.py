@@ -32,7 +32,7 @@ KALEIDO_DEFAULTS = {
     "seed_quad":     "br",
 }
 
-VISUALIZERS = ["warpfield", "02_kaleidoscope_spokes", "09_beat_reactive", "plasma"]
+VISUALIZERS = ["warpfield", "02_kaleidoscope_spokes", "09_beat_reactive", "plasma", "plasma_warm"]
 
 MAX_UPLOAD_MB = 100
 
