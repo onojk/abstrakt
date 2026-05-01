@@ -1,7 +1,7 @@
 # Upstream Fixes
 
-Bugs found and fixed during Abstrakt Phase 1–2 development. Two were in
-`kaleido-video-generator`; one was latent in `pygame-eq-visualizer`.
+Bugs found and fixed during Abstrakt development. Three were in
+`kaleido-video-generator`; two were latent in `pygame-eq-visualizer`.
 
 ---
 
@@ -70,3 +70,58 @@ by adding an explicit `if average_energy == 0: return False` before the
 division.
 
 Both bugs are present in the upstream `pygame-eq-visualizer` source unchanged.
+
+---
+
+## 4. kaleido: frei0r produces black output when input width is not divisible by 4 (commit 0490f7e — Abstrakt webui)
+
+`kaleid0sc0pe.so` silently produces a fully-black output frame when the input
+video width is not a multiple of 4. The RGBA pixel stride for a 4-byte-per-pixel
+format requires 4-byte alignment per row; a width like 854 (854 % 4 = 2) violates
+this, causing the plugin to output black without printing any error.
+
+This was discovered while debugging the Abstrakt webui 480p preset, which used
+`width=854`. The non-`APPLY_KDEN` path was coincidentally immune: the 2×2 mirror
+step crops `iw/2 = 427px` (odd), which yuv420p encoding rounds down to 426px per
+half, giving a 852px mirrored output (852 % 4 = 0) — safe for step 8. But the
+`APPLY_KDEN` path applies frei0r to the raw 854px video before mirroring, hitting
+the stride bug immediately.
+
+Fixed in the Abstrakt webui by changing the 480p preset width from 854 to 852.
+Any caller passing a width not divisible by 4 to `generate.sh` with `APPLY_KDEN=1`
+will hit this bug; the workaround is to ensure input width % 4 == 0.
+
+---
+
+## 5. kaleido: frei0r kaleid0sc0pe called with wrong parameter syntax (commit 48ad151a — kaleido main)
+
+Both step 7 (`APPLY_KDEN` pre-mirror pass) and step 8 (final pass) in
+`generate.sh` called the frei0r filter as:
+
+```
+frei0r=kaleid0sc0pe:${KALEIDO_SIDES}
+```
+
+This syntax sets frei0r parameter index 0 to the value of `KALEIDO_SIDES`. Per
+the plugin's parameter list (extracted from the `.so` via `strings`), parameter 0
+is `origin_x` (the horizontal sample center, range 0.0–1.0). Passing `KALEIDO_SIDES=12`
+sets `origin_x` to 12.0, which clamps to 1.0 — the far right edge of the frame.
+The segmentation parameter (parameter index 2, which controls wedge count) was
+never set; it defaulted to `16/128 = 0.125` (16 wedges) regardless of
+`KALEIDO_SIDES`. `KALEIDO_SIDES` was effectively a no-op for its intended purpose.
+
+Every kaleido render before this fix sampled from the bottom-right corner of each
+frame instead of the center, and always produced approximately 16 wedges regardless
+of the configured value.
+
+The correct modern ffmpeg frei0r syntax is:
+```
+frei0r=filter_name=kaleid0sc0pe:filter_params=ox|oy|seg
+```
+where `seg = KALEIDO_SIDES / 128` (normalized). The fix computes
+`SEG_NORMALIZED` via awk and uses `KALEIDO_ORIGIN_X` / `KALEIDO_ORIGIN_Y`
+env vars (defaulting to 0.5|0.5, frame center). `KALEIDO_SIDES` now correctly
+controls the wedge count.
+
+Verified at wedge counts 8, 12, 16, and 24 — all produce the expected symmetric
+pattern centered in the frame.
