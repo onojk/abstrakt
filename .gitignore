@@ -5,3 +5,4 @@
 __pycache__/
 *.pyc
 /jobs/
+release_notes_*.md
