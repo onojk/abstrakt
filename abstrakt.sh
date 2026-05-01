@@ -16,17 +16,19 @@
 #       --skip-mirror       Skip 2x2 mirror step
 #       --seed-quad QUAD    Seed quadrant: tl|tr|bl|br (default: br)
 #       --keep-tmp          Keep intermediate files after completion
+#       --visualizer NAME   Visualizer name under visualizers/ (default: warpfield)
+#       --duration N        Trim audio to N seconds before rendering
+#       --save-raw PATH     Copy raw visualizer output to PATH after step 2
 #   -v, --verbose           Verbose output
 
 set -euo pipefail
 
 # ── Paths (can be overridden via env) ─────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PYGAME_PROJECT="${PYGAME_PROJECT:-/home/onojk123/Projects/pygame-eq-visualizer}"
-KALEIDO_PROJECT="${KALEIDO_PROJECT:-/home/onojk123/kaleido-video-generator}"
+PYGAME_PROJECT="${PYGAME_PROJECT:-${HOME}/pygame-eq-visualizer}"
+KALEIDO_PROJECT="${KALEIDO_PROJECT:-${HOME}/kaleido-video-generator}"
 PYGAME_VENV="${PYGAME_VENV:-${PYGAME_PROJECT}/.venv}"
 
-VISUALIZER="${SCRIPT_DIR}/visualizers/warpfield_offline.py"
 KALEIDO_GENERATE="${KALEIDO_PROJECT}/scripts/generate.sh"
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
@@ -43,6 +45,9 @@ SKIP_MIRROR=0
 SEED_QUAD="br"
 KEEP_TMP=0
 VERBOSE=0
+VISUALIZER_NAME="warpfield"
+DURATION=0
+SAVE_RAW=""
 
 # ── Parse args ────────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -58,6 +63,9 @@ while [[ $# -gt 0 ]]; do
     --skip-mirror)    SKIP_MIRROR=1;       shift ;;
     --seed-quad)      SEED_QUAD="$2";      shift 2 ;;
     --keep-tmp)       KEEP_TMP=1;          shift ;;
+    --visualizer)     VISUALIZER_NAME="$2"; shift 2 ;;
+    --duration)       DURATION="$2";       shift 2 ;;
+    --save-raw)       SAVE_RAW="$2";       shift 2 ;;
     -v|--verbose)     VERBOSE=1;           shift ;;
     -*)               echo "[ERROR] Unknown option: $1" >&2; exit 1 ;;
     *)                AUDIO_FILE="$1";     shift ;;
@@ -65,6 +73,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── Validate ──────────────────────────────────────────────────────────────────
+VISUALIZER="${SCRIPT_DIR}/visualizers/${VISUALIZER_NAME}_offline.py"
+
 if [[ -z "$AUDIO_FILE" ]]; then
   echo "Usage: $(basename "$0") <audio_file> [OPTIONS]" >&2
   exit 1
@@ -104,9 +114,16 @@ ffmpeg -y -loglevel warning \
   -ar 44100 -ac 1 \
   "$WAV_FILE"
 
+if [[ "$DURATION" -gt 0 ]]; then
+  WAV_TRIMMED="${JOB_DIR}/audio_trimmed.wav"
+  ffmpeg -y -loglevel warning -i "$WAV_FILE" -t "$DURATION" "$WAV_TRIMMED"
+  WAV_FILE="$WAV_TRIMMED"
+  say "    Trimmed audio to ${DURATION}s"
+fi
+
 # ── Step 2: Render pygame visualizer (offline, headless) ─────────────────────
 RAW_VIDEO="${JOB_DIR}/raw.mp4"
-say "2/4  Rendering warpfield visualizer (${WIDTH}x${HEIGHT} @ ${FPS}fps)..."
+say "2/4  Rendering ${VISUALIZER_NAME} visualizer (${WIDTH}x${HEIGHT} @ ${FPS}fps)..."
 
 # shellcheck disable=SC1091
 source "${PYGAME_VENV}/bin/activate"
@@ -117,6 +134,11 @@ ABSTRAKT_FPS="$FPS" \
 deactivate
 
 [[ -f "$RAW_VIDEO" ]] || { echo "[ERROR] Visualizer produced no output at $RAW_VIDEO" >&2; exit 1; }
+
+if [[ -n "$SAVE_RAW" ]]; then
+  cp "$RAW_VIDEO" "$SAVE_RAW"
+  say "    Saved raw video to $SAVE_RAW"
+fi
 
 # Measure actual rendered duration for the kaleido summary line
 VIDEO_DURATION=$(ffprobe -v error -show_entries format=duration \
