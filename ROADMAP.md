@@ -6,12 +6,10 @@
 - UI polish: drag-drop, inline player, better progress (Phase 2 todo)
 
 ## v0.3 — Plasma base layer (HIGH PRIORITY)
-**Why this is now critical, not nice-to-have:**
 
 v0.1's three visualizers compose differently with the kaleido post-stack:
 - warpfield: full-frame dot field → full mandala (works)
-- 02_kaleidoscope_spokes: radial spokes from center → empty-center
-  "frame" (composes poorly with kaleido)
+- 02_kaleidoscope_spokes: radial spokes from center → empty-center "frame"
 - 09_beat_reactive: same architectural issue as 02
 
 The kaleido post-stack honors the visualizer's spatial distribution.
@@ -27,9 +25,6 @@ This makes 02 and 09 viable for music video output by filling their
 empty centers automatically. Plasma alone is also a new aesthetic.
 
 ## v0.4 (later)
-- Multi-source compositing UI: choose plasma + visualizer + flair
-  layers independently
-- Persistent job state (file-backed) so 4K renders survive page
-  reload
+- Multi-source compositing UI
+- Persistent job state for 4K renders surviving page reload
 - Public hosting deployment story
-
