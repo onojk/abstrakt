@@ -57,9 +57,16 @@ print(f"[camo_plasma] Seed: {_SEED}", flush=True)
 # ── Palette — 5 HSL colours, one of three harmony schemes ─────────────────────
 def _roll_palette() -> list[tuple[int, int, int]]:
     base_h = float(rng.uniform(0.0, 1.0))
-    scheme = int(rng.integers(0, 3))
-    if scheme == 0:    # analogous
-        offsets = [0.00, 0.06, 0.12, 0.18, 0.24]
+    # Weighted scheme: 25% analogous, 40% triadic, 35% split-comp
+    r = float(rng.random())
+    if r < 0.25:
+        scheme = 0   # analogous
+    elif r < 0.65:
+        scheme = 1   # triadic
+    else:
+        scheme = 2   # split-comp
+    if scheme == 0:    # analogous — stretched to ±70° for visible variety
+        offsets = [0.00, 35/360, -35/360, 70/360, -70/360]
     elif scheme == 1:  # triadic
         offsets = [0.00, 0.33, 0.67, 0.08, 0.42]
     else:              # split-complement
