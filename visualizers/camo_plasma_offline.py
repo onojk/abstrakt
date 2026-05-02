@@ -55,7 +55,8 @@ rng = np.random.default_rng(_SEED)
 print(f"[camo_plasma] Seed: {_SEED}", flush=True)
 
 # ── Palette — 5 HSL colours, one of three harmony schemes ─────────────────────
-def _roll_palette() -> list[tuple[int, int, int]]:
+def _roll_palette() -> tuple[list, list]:
+    """Return (palette_rgb, palette_hsl); HSL tuples are (h, s, l) floats in [0, 1]."""
     base_h = float(rng.uniform(0.0, 1.0))
     # Weighted scheme: 25% analogous, 40% triadic, 35% split-comp
     r = float(rng.random())
@@ -74,17 +75,46 @@ def _roll_palette() -> list[tuple[int, int, int]]:
 
     # Luminance tiers — indices 0=dark, 1-2=mid, 3-4=bright
     lum_tiers = [(0.12, 0.30), (0.35, 0.55), (0.35, 0.55), (0.55, 0.80), (0.55, 0.80)]
-    colours: list[tuple[int, int, int]] = []
+    colours_rgb: list[tuple[int, int, int]] = []
+    colours_hsl: list[tuple[float, float, float]] = []
     for i, off in enumerate(offsets):
         h   = (base_h + off) % 1.0
         lo, hi = lum_tiers[i]
         l   = float(rng.uniform(lo, hi))
         s   = float(rng.uniform(0.55, 0.88))
-        r, g, b = colorsys.hls_to_rgb(h, l, s)
-        colours.append((int(r * 255), int(g * 255), int(b * 255)))
-    return colours
+        rr, gg, bb = colorsys.hls_to_rgb(h, l, s)
+        colours_rgb.append((int(rr * 255), int(gg * 255), int(bb * 255)))
+        colours_hsl.append((h, s, l))   # note: colorsys takes (h, l, s); we store (h, s, l)
+    return colours_rgb, colours_hsl
 
-PALETTE = _roll_palette()
+PALETTE, PALETTE_HSL = _roll_palette()
+
+# ── Substrate paint helpers ────────────────────────────────────────────────────
+def _value_noise(t: float, seed: int, channel: int) -> float:
+    """Smooth 1D value noise in [0, 1]; coherent along t, independent per seed/channel."""
+    i = int(math.floor(t))
+    f = t - i
+    f = f * f * (3.0 - 2.0 * f)   # smoothstep
+
+    def _h(n: int) -> float:
+        n = (n + seed + channel * 1234567) & 0x7FFFFFFF
+        n = ((n >> 16) ^ n) * 0x45D9F3B & 0x7FFFFFFF
+        n = ((n >> 16) ^ n) * 0x45D9F3B & 0x7FFFFFFF
+        n = ((n >> 16) ^ n) & 0x7FFFFFFF
+        return n / 0x7FFFFFFF
+
+    return _h(i) + (_h(i + 1) - _h(i)) * f
+
+
+def _hue_lerp(h1: float, h2: float, t: float) -> float:
+    """Shortest-arc hue interpolation on the [0, 1) unit circle."""
+    d = h2 - h1
+    if d > 0.5:
+        d -= 1.0
+    elif d < -0.5:
+        d += 1.0
+    return (h1 + d * t) % 1.0
+
 
 # ── Substrate painting ─────────────────────────────────────────────────────────
 def _blob_polygon(
@@ -115,15 +145,25 @@ def _paint_substrate() -> np.ndarray:
     n_strokes = max(80, min(n_strokes, 600))
 
     for _ in range(n_strokes):
-        # Bimodal luminance distribution: 15% dark, 40% mid, 45% bright
+        # Primary color — bimodal luminance distribution preserved
         roll = float(rng.uniform(0.0, 1.0))
         if roll < 0.15:
-            colour_idx = 0
+            lum_band = 0
+            idx_a = 0
         elif roll < 0.55:
-            colour_idx = int(rng.integers(1, 3))  # indices 1-2 (mid)
+            lum_band = 1
+            idx_a = int(rng.integers(1, 3))
         else:
-            colour_idx = int(rng.integers(3, 5))  # indices 3-4 (bright)
-        colour = PALETTE[colour_idx]
+            lum_band = 2
+            idx_a = int(rng.integers(3, 5))
+        # Secondary color — guaranteed different index
+        idx_b = (idx_a + 1 + int(rng.integers(0, 4))) % 5
+        # Per-stroke noise params for coherent but independent wobble
+        noise_t0   = float(rng.uniform(0.0, 100.0))
+        noise_seed = int(rng.integers(0, 2**31))
+
+        h1, s1, l1 = PALETTE_HSL[idx_a]
+        h2, s2, l2 = PALETTE_HSL[idx_b]
 
         # Random walk anchor path
         n_anchors = int(rng.integers(4, 10))
@@ -138,25 +178,41 @@ def _paint_substrate() -> np.ndarray:
             path_x.append(path_x[-1] + step * math.cos(ang))
             path_y.append(path_y[-1] + step * math.sin(ang))
 
-        # Stamp blobs along the path with path-aligned rotation, lag 0.18
+        # Stamp blobs along the path with color drift
         blob_r   = float(rng.uniform(0.015, 0.08)) * min(_SUB_W, _SUB_H)
         n_stamps = int(rng.integers(3, 9))
         smooth_r = float(rng.uniform(0.0, math.tau))
 
         for si in range(n_stamps):
-            t    = si / max(n_stamps - 1, 1)
-            pos  = t * (len(path_x) - 1)
+            u    = si / max(n_stamps - 1, 1)
+            pos  = u * (len(path_x) - 1)
             idx  = min(int(pos), len(path_x) - 2)
             frac = pos - idx
             cx   = path_x[idx] + frac * (path_x[idx + 1] - path_x[idx])
             cy   = path_y[idx] + frac * (path_y[idx + 1] - path_y[idx])
 
-            # Rotate toward path tangent with smoothing factor 0.18
+            # Path-aligned rotation with lag 0.18
             tx       = path_x[idx + 1] - path_x[idx]
             ty       = path_y[idx + 1] - path_y[idx]
             target   = math.atan2(ty, tx)
             diff     = (target - smooth_r + math.pi) % math.tau - math.pi
             smooth_r += 0.18 * diff
+
+            # Lerp HSL between primary and secondary + per-stamp value-noise wobble
+            noise_t = noise_t0 + u * 4.0
+            hue = _hue_lerp(h1, h2, u)
+            sat = s1 + (s2 - s1) * u
+            lit = l1 + (l2 - l1) * u
+            hue = (hue + (_value_noise(noise_t, noise_seed, 0) - 0.5) * 0.16) % 1.0
+            sat = max(0.0, min(1.0, sat + (_value_noise(noise_t, noise_seed, 1) - 0.5) * 0.30))
+            lit = max(0.0, min(1.0, lit + (_value_noise(noise_t, noise_seed, 2) - 0.5) * 0.24))
+            if lum_band == 0:
+                lit = max(0.05, lit - 0.15)
+            elif lum_band == 2:
+                lit = min(0.92, lit + 0.15)
+
+            rr, gg, bb = colorsys.hls_to_rgb(hue, lit, sat)
+            colour = (int(rr * 255), int(gg * 255), int(bb * 255))
 
             poly = _blob_polygon(cx, cy, blob_r, smooth_r,
                                  float(rng.uniform(0.0, math.tau)))
