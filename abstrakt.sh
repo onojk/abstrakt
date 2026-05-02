@@ -49,6 +49,12 @@ VISUALIZER_NAME="warpfield"
 DURATION=0
 SAVE_RAW=""
 
+# ── Honor ABSTRAKT_* env vars as defaults (CLI flags still take priority) ─────
+if [[ -n "${ABSTRAKT_WIDTH:-}" && -n "${ABSTRAKT_HEIGHT:-}" ]]; then
+  RESOLUTION="${ABSTRAKT_WIDTH}x${ABSTRAKT_HEIGHT}"
+fi
+[[ -n "${ABSTRAKT_FPS:-}" ]] && FPS="${ABSTRAKT_FPS}"
+
 # ── Parse args ────────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
   case "$1" in
