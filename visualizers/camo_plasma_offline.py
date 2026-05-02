@@ -45,8 +45,8 @@ _SUB_W        = int(os.environ.get("CAMO_SUBSTRATE_WIDTH",  WIDTH * 4))
 _SUB_H        = int(os.environ.get("CAMO_SUBSTRATE_HEIGHT", int(HEIGHT * 1.3)))
 _N_MACRO      = int(os.environ.get("CAMO_N_MACRO_SWIRLS",   4))   # centers per macro pass
 _N_MICRO      = int(os.environ.get("CAMO_N_MICRO_SWIRLS",  12))   # centers per micro pass
-_MACRO_ITER   = int(os.environ.get("CAMO_MACRO_ITERATIONS", 4))   # sequential macro warp passes
-_MICRO_ITER   = int(os.environ.get("CAMO_MICRO_ITERATIONS", 3))   # sequential micro warp passes
+_MACRO_ITER   = int(os.environ.get("CAMO_MACRO_ITERATIONS", 3))   # sequential macro warp passes
+_MICRO_ITER   = int(os.environ.get("CAMO_MICRO_ITERATIONS", 2))   # sequential micro warp passes
 _SCROLL_SPEED = float(os.environ.get("CAMO_SCROLL_SPEED",  2.5))
 _LAG          = float(os.environ.get("CAMO_LAG",           0.12))
 _REACTIVITY   = float(os.environ.get("CAMO_REACTIVITY",    0.7))
@@ -167,11 +167,16 @@ def _swirl_pass(
     r_frac_min: float,
     r_frac_max: float,
     base_strength: float,
+    strength_scale: float = 1.0,
+    all_centers: list | None = None,
+    min_dist: float = 0.0,
+    max_attempts: int = 30,
 ) -> np.ndarray:
     """Apply n_centers swirl vortices to img and return a new warped image.
 
-    Hard falloff: full strength inside 70% of radius, fast dropoff in outer 30%.
-    Each pass re-samples the image so sequential calls compose rather than collapse.
+    Falloff: full strength to 50% of radius, linear dropoff in outer 50%.
+    Rejection sampling on center placement (min_dist) spreads centers spatially.
+    strength_scale: per-iteration decay multiplier (1.0 → 0.8 → 0.6).
     """
     from scipy.ndimage import map_coordinates
 
@@ -181,25 +186,39 @@ def _swirl_pass(
     Xs = Xd.astype(np.float32)
     r_min, r_max = r_frac_min * H, r_frac_max * H
 
+    if all_centers is None:
+        all_centers = []
+
     for k in range(n_centers):
-        cx       = float(rng.uniform(0.1 * W, 0.9 * W))
-        cy       = float(rng.uniform(0.1 * H, 0.9 * H))
+        # Rejection sampling: keep centers spread across the canvas
+        cx_try = cy_try = 0.0
+        for _ in range(max_attempts):
+            cx_try = float(rng.uniform(0.1 * W, 0.9 * W))
+            cy_try = float(rng.uniform(0.1 * H, 0.9 * H))
+            if min_dist <= 0.0 or not all_centers:
+                break
+            if all(math.hypot(cx_try - ex, cy_try - ey) >= min_dist
+                   for ex, ey in all_centers):
+                break
+        cx, cy = cx_try, cy_try
+        all_centers.append((cx, cy))
+
         radius   = float(rng.uniform(r_min, r_max))
         sign     = 1.0 if k % 2 == 0 else -1.0
-        strength = base_strength * sign * (0.7 + float(rng.uniform(0.0, 0.8)))
+        strength = base_strength * strength_scale * sign * (0.7 + float(rng.uniform(0.0, 0.8)))
 
         dx = Xs - cx
         dy = Ys - cy
         r  = np.sqrt(dx * dx + dy * dy)
 
-        # Plateau-and-dropoff falloff: full strength to 70% radius, hard edge at 100%
-        inner   = 0.7
+        # Plateau-and-dropoff falloff: full strength to 50% radius, linear out to 100%
+        inner   = 0.5
         falloff = np.where(
             r < radius * inner,
             1.0,
             np.maximum(0.0, 1.0 - (r - radius * inner) / (radius * (1.0 - inner))),
         )
-        falloff = falloff ** 0.5   # soften edge to reduce aliasing
+        falloff = falloff ** 0.5
         angle   = -strength * falloff
 
         cos_a = np.cos(angle)
@@ -227,25 +246,39 @@ def _build_substrate() -> np.ndarray:
     substrate = _paint_substrate()
     t_swirl = time.time()
 
-    # Macro: _MACRO_ITER sequential passes × _N_MACRO centers, large radii (50-90%)
+    # Macro passes: shared center list enforces H*0.40 minimum spacing across all passes
+    macro_centers: list = []
     for i in range(_MACRO_ITER):
-        t0        = time.time()
-        strength  = 8.0 * (0.7 + float(rng.uniform(0.0, 0.8)))
-        substrate = _swirl_pass(substrate, _N_MACRO, 0.50, 0.90, strength)
+        t0       = time.time()
+        scale    = max(0.4, 1.0 - i * 0.2)   # 1.0 → 0.8 → 0.6 per pass
+        strength = 4.5 * (0.7 + float(rng.uniform(0.0, 0.8)))
+        substrate = _swirl_pass(
+            substrate, _N_MACRO, 0.50, 0.90, strength,
+            strength_scale=scale,
+            all_centers=macro_centers,
+            min_dist=_SUB_H * 0.40,
+        )
         print(
             f"[camo_plasma] Macro pass {i+1}/{_MACRO_ITER}"
-            f"  ({time.time()-t0:.1f}s  base_str={strength:.2f})",
+            f"  ({time.time()-t0:.1f}s  base_str={strength:.2f}  scale={scale:.1f})",
             flush=True,
         )
 
-    # Micro: _MICRO_ITER sequential passes × _N_MICRO centers, tight radii (5-15%)
+    # Micro passes: separate shared center list, H*0.10 minimum spacing
+    micro_centers: list = []
     for i in range(_MICRO_ITER):
-        t0        = time.time()
-        strength  = 6.0 * (0.7 + float(rng.uniform(0.0, 0.8)))
-        substrate = _swirl_pass(substrate, _N_MICRO, 0.05, 0.15, strength)
+        t0       = time.time()
+        scale    = max(0.4, 1.0 - i * 0.2)
+        strength = 4.0 * (0.7 + float(rng.uniform(0.0, 0.8)))
+        substrate = _swirl_pass(
+            substrate, _N_MICRO, 0.05, 0.15, strength,
+            strength_scale=scale,
+            all_centers=micro_centers,
+            min_dist=_SUB_H * 0.10,
+        )
         print(
             f"[camo_plasma] Micro pass {i+1}/{_MICRO_ITER}"
-            f"  ({time.time()-t0:.1f}s  base_str={strength:.2f})",
+            f"  ({time.time()-t0:.1f}s  base_str={strength:.2f}  scale={scale:.1f})",
             flush=True,
         )
 
