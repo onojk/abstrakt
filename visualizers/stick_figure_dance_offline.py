@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# stick_figure_dance_offline.py — Procedurally-rigged dancing skeleton for Abstrakt pipeline.
+# stick_figure_dance_offline.py — Procedurally-rigged dancing figure for Abstrakt pipeline.
 #
 # Hierarchical 15-joint skeleton with forward kinematics. Pose library spans
 # ~130 years of dance: Hillgrove's 1864 Victorian ballroom manual, Davis's
@@ -7,8 +7,9 @@
 # 1970s-90s). BASTE framework: per-move easing, root-y level modulation, and
 # locomotor travel. Inverted moves (handstands, freezes) render 180° rotated.
 # Audio energy selects era/category; kaleido stage mirrors into mandala.
-# Skeleton rendering: skull + ribcage + pelvis + long bones + hand/foot fans.
-# DANCE_SKELETON=0 falls back to original stick-figure mode.
+# Characters: DANCE_CHARACTER=skeleton (default) — anatomical skull/ribcage/pelvis;
+#             DANCE_CHARACTER=cat — pixel-art mystical spirit-guide cat with spring tail.
+# DANCE_SKELETON=0 falls back to original neon stick-figure mode.
 
 from __future__ import annotations
 
@@ -40,9 +41,17 @@ SAMPLES_PER_FRAME = int(round(SR / FPS))
 N_FFT             = 2048
 
 # ── Dance params ───────────────────────────────────────────────────────────────
-SKELETON_MODE  = os.environ.get("DANCE_SKELETON", "1") == "1"
-_default_trail = 0.75 if SKELETON_MODE else 0.6
-TRAIL_DECAY    = float(os.environ.get("DANCE_TRAIL_DECAY", _default_trail))
+DANCE_CHARACTER = os.environ.get("DANCE_CHARACTER", "skeleton").lower()
+if DANCE_CHARACTER not in ("skeleton", "cat"):
+    DANCE_CHARACTER = "skeleton"
+SKELETON_MODE   = os.environ.get("DANCE_SKELETON", "1") == "1"
+if DANCE_CHARACTER == "cat":
+    _default_trail = 0.85
+elif SKELETON_MODE:
+    _default_trail = 0.75
+else:
+    _default_trail = 0.6
+TRAIL_DECAY = float(os.environ.get("DANCE_TRAIL_DECAY", _default_trail))
 _SEED_ENV     = os.environ.get("DANCE_SEED")
 _SEED         = int(_SEED_ENV) if _SEED_ENV else random.randint(0, 2**31 - 1)
 _SCALE_ENV    = os.environ.get("DANCE_FIGURE_SCALE")
@@ -149,7 +158,19 @@ _ci          = rng.randint(0, len(PALETTE_HSL) - 1)
 _h, _s, _l  = PALETTE_HSL[_ci]
 FIGURE_COLOR = hsl_to_rgb(_h, _s,       min(0.95, _l + 0.20))
 JOINT_COLOR  = hsl_to_rgb(_h, _s * 0.7, min(0.98, _l + 0.40))
-BONE_COLOR   = (240, 230, 210)  # aged bone-cream for skeleton mode
+BONE_COLOR     = (240, 230, 210)  # aged bone-cream for skeleton mode
+
+# Cat character palette
+CAT_BODY       = ( 90,  75, 130)
+CAT_BODY_GLOW  = (140, 100, 200)
+CAT_FUR        = (160, 140, 200)
+CAT_FUR_GLOW   = (200, 180, 240)
+CAT_EYE        = (250, 250, 255)
+CAT_EYE_GLOW   = (180, 230, 255)
+CAT_PAW_PAD    = (255, 180, 200)
+CAT_NOSE       = (255, 180, 200)
+CAT_TAIL_TIP   = (220, 200, 255)
+SPARK          = (200, 240, 255)
 
 print(f"[stick_figure_dance] Root ({root_x_base:.0f},{root_y_base:.0f})  "
       f"line_w={LINE_WIDTH}  head_r={HEAD_RADIUS}  fig_h={_figure_height_px:.0f}px",
@@ -1668,6 +1689,268 @@ def render_skeleton(surface: pygame.Surface,
                           line_color, scale_factor)
 
 
+# ── Cat character rendering ────────────────────────────────────────────────────
+
+class CatTail:
+    """Damped angular spring — drives the tail-tip curl."""
+    def __init__(self) -> None:
+        self.angle = 0.4
+        self.vel   = 0.0
+
+    def update(self, torso_joint_angle: float) -> None:
+        target     = 0.5 * math.sin(torso_joint_angle * 3.0 + 0.5) + 0.25
+        spring     = -12.0 * (self.angle - target)
+        damp       = -5.0  * self.vel
+        dt         = 1.0 / FPS
+        self.vel   += (spring + damp) * dt
+        self.angle += self.vel * dt
+        self.angle  = max(-1.2, min(1.8, self.angle))
+
+
+@dataclass
+class Sparkle:
+    x:    float
+    y:    float
+    vx:   float
+    vy:   float
+    life: float   # frames remaining
+
+
+def emit_sparkles(world_pos: dict[str, tuple[float, float]],
+                  rng: random.Random, scale: float, n: int = 4) -> None:
+    _joints = ["hand_l", "hand_r", "foot_l", "foot_r", "head"]
+    for _ in range(n):
+        jx, jy = world_pos[rng.choice(_joints)]
+        ang = rng.uniform(0, math.tau)
+        spd = rng.uniform(30, 90) * scale
+        sparkles.append(Sparkle(jx, jy,
+                                math.cos(ang) * spd, math.sin(ang) * spd,
+                                rng.uniform(8, 20)))
+
+
+def update_and_render_sparkles(surface: pygame.Surface) -> None:
+    global sparkles
+    alive = []
+    for sp in sparkles:
+        sp.x   += sp.vx / FPS
+        sp.y   += sp.vy / FPS
+        sp.vy  += 25.0 / FPS   # gentle gravity
+        sp.life -= 1
+        if sp.life > 0:
+            frac = min(1.0, sp.life / 15.0)
+            r    = max(1, round(2 * frac))
+            col  = (int(SPARK[0] * frac), int(SPARK[1] * frac), int(SPARK[2] * frac))
+            pygame.draw.circle(surface, col, (int(sp.x), int(sp.y)), r)
+            alive.append(sp)
+    sparkles = alive
+
+
+def render_cat_head(surface: pygame.Surface,
+                    head_pos: tuple[float, float],
+                    neck_pos: tuple[float, float],
+                    scale: float) -> None:
+    """Pixel-art cat head: rounded cranium, ear triangles, glow eyes, whiskers."""
+    hx, hy = head_pos
+    nx, ny = neck_pos
+    dx, dy = hx - nx, hy - ny
+    dist   = math.hypot(dx, dy) or 1.0
+    fwx, fwy = dx / dist, dy / dist   # neck → head (forward)
+    rtx, rty = -fwy, fwx               # rightward
+
+    def pt(lat: float, fwd: float) -> tuple[int, int]:
+        return (int(hx + rtx * lat + fwx * fwd),
+                int(hy + rty * lat + fwy * fwd))
+
+    hr = max(10, int(12 * scale))
+
+    # Glow halo
+    pygame.draw.circle(surface, CAT_BODY_GLOW, (int(hx), int(hy)), hr + 3)
+    # Main head
+    pygame.draw.circle(surface, CAT_BODY, (int(hx), int(hy)), hr)
+    # Crown highlight
+    pygame.draw.circle(surface, CAT_FUR, pt(0, int(-hr * 0.35)), max(3, hr // 3))
+
+    # Ears
+    for side in (-1, 1):
+        ear = [pt(side * hr * 0.40, -hr * 0.55),
+               pt(side * hr * 0.15, -hr * 1.22),
+               pt(side * hr * 0.90, -hr * 1.00)]
+        pygame.draw.polygon(surface, CAT_FUR_GLOW, ear)
+        inner = [pt(side * hr * 0.38, -hr * 0.61),
+                 pt(side * hr * 0.20, -hr * 1.06),
+                 pt(side * hr * 0.70, -hr * 0.90)]
+        pygame.draw.polygon(surface, CAT_BODY_GLOW, inner)
+
+    # Eyes
+    eye_r = max(2, int(2.5 * scale))
+    for side in (-1, 1):
+        ep = pt(side * hr * 0.38, int(-hr * 0.10))
+        pygame.draw.circle(surface, CAT_EYE_GLOW, ep, eye_r + 2)
+        pygame.draw.circle(surface, CAT_EYE,      ep, eye_r)
+
+    # Nose
+    np_ = pt(0, int(hr * 0.30))
+    pygame.draw.circle(surface, CAT_NOSE, np_, max(1, int(1.5 * scale)))
+
+    # Whiskers (3 per side, fanning from near nose)
+    wb  = pt(0, int(hr * 0.18))
+    wl  = int(hr * 1.3)
+    for side in (-1, 1):
+        for tilt in (-0.18, 0.0, 0.18):
+            ex = int(wb[0] + rtx * (side * wl) + fwx * (tilt * wl))
+            ey = int(wb[1] + rty * (side * wl) + fwy * (tilt * wl))
+            pygame.draw.line(surface, CAT_FUR, wb, (ex, ey), 1)
+
+
+def render_cat_torso(surface: pygame.Surface,
+                     root_pos: tuple[float, float],
+                     torso_pos: tuple[float, float],
+                     shoulder_l: tuple[float, float],
+                     shoulder_r: tuple[float, float],
+                     scale: float) -> None:
+    """Upper body polygon: chest breadth tapering down to waist."""
+    rx, ry = root_pos
+    tx, ty = torso_pos
+    dx, dy = tx - rx, ty - ry
+    dist   = math.hypot(dx, dy) or 1.0
+    fwx, fwy = dx / dist, dy / dist
+    rtx, rty = -fwy, fwx
+
+    sw = max(9, int(13 * scale))   # chest half-width
+    ww = max(6, int(8  * scale))   # waist half-width
+
+    body = [(int(tx + rtx * sw),  int(ty + rty * sw)),
+            (int(tx + rtx * -sw), int(ty + rty * -sw)),
+            (int(rx + rtx * -ww), int(ry + rty * -ww)),
+            (int(rx + rtx * ww),  int(ry + rty * ww))]
+    pygame.draw.polygon(surface, CAT_BODY_GLOW, body)
+    inner = [(int(tx + rtx * (sw - 2)),  int(ty + rty * (sw - 2))),
+             (int(tx + rtx * -(sw - 2)), int(ty + rty * -(sw - 2))),
+             (int(rx + rtx * -(ww - 1)), int(ry + rty * -(ww - 1))),
+             (int(rx + rtx * (ww - 1)),  int(ry + rty * (ww - 1)))]
+    pygame.draw.polygon(surface, CAT_BODY, inner)
+    # Fur sheen on upper half
+    mid_x  = int((tx + rx) / 2)
+    mid_y  = int((ty + ry) / 2)
+    sheen  = [(int(tx + rtx * (sw - 3)), int(ty + rty * (sw - 3))),
+              (int(tx + rtx * -(sw - 3)), int(ty + rty * -(sw - 3))),
+              (int(mid_x + rtx * -(ww - 2)), int(mid_y + rty * -(ww - 2))),
+              (int(mid_x + rtx * (ww - 2)),  int(mid_y + rty * (ww - 2)))]
+    pygame.draw.polygon(surface, CAT_FUR, sheen)
+
+
+def render_cat_hip(surface: pygame.Surface,
+                   root_pos: tuple[float, float],
+                   torso_pos: tuple[float, float],
+                   hip_l: tuple[float, float],
+                   hip_r: tuple[float, float],
+                   scale: float) -> None:
+    """Rear haunches: pelvis-width oval below the waist."""
+    rx, ry = root_pos
+    tx, ty = torso_pos
+    dx, dy = tx - rx, ty - ry
+    dist   = math.hypot(dx, dy) or 1.0
+    fwx, fwy = dx / dist, dy / dist
+    rtx, rty = -fwy, fwx
+
+    hw = max(8, int(11 * scale))   # haunch half-width
+
+    haunch = [(int(rx + rtx * hw),  int(ry + rty * hw)),
+              (int(rx + rtx * -hw), int(ry + rty * -hw)),
+              (int(rx - fwx * hw * 0.5 + rtx * -(hw - 2)), int(ry - fwy * hw * 0.5 + rty * -(hw - 2))),
+              (int(rx - fwx * hw * 0.5 + rtx * (hw - 2)),  int(ry - fwy * hw * 0.5 + rty * (hw - 2)))]
+    pygame.draw.polygon(surface, CAT_BODY_GLOW, haunch)
+    inner = [(int(rx + rtx * (hw - 2)),  int(ry + rty * (hw - 2))),
+             (int(rx + rtx * -(hw - 2)), int(ry + rty * -(hw - 2))),
+             (int(rx - fwx * hw * 0.5 + rtx * -(hw - 3)), int(ry - fwy * hw * 0.5 + rty * -(hw - 3))),
+             (int(rx - fwx * hw * 0.5 + rtx * (hw - 3)),  int(ry - fwy * hw * 0.5 + rty * (hw - 3)))]
+    pygame.draw.polygon(surface, CAT_BODY, inner)
+
+
+def render_cat_limb(surface: pygame.Surface,
+                    p1: tuple[float, float],
+                    p2: tuple[float, float],
+                    is_end: bool,
+                    scale: float) -> None:
+    """One limb segment; is_end=True adds paw pad at p2."""
+    x1, y1 = int(p1[0]), int(p1[1])
+    x2, y2 = int(p2[0]), int(p2[1])
+    wg = max(6, int(9 * scale))
+    wb = max(4, int(6 * scale))
+    pygame.draw.line(surface, CAT_BODY_GLOW, (x1, y1), (x2, y2), wg)
+    pygame.draw.line(surface, CAT_BODY,      (x1, y1), (x2, y2), wb)
+    if is_end:
+        pr = max(3, int(4 * scale))
+        pygame.draw.circle(surface, CAT_FUR,     (x2, y2), pr)
+        pygame.draw.circle(surface, CAT_PAW_PAD, (x2, y2), max(1, pr - 2))
+
+
+def _render_cat_tail(surface: pygame.Surface,
+                     root_pos: tuple[float, float],
+                     torso_pos: tuple[float, float],
+                     cat_tail: "CatTail",
+                     scale: float) -> None:
+    """3-segment spring tail drawn behind the body."""
+    rx, ry = root_pos
+    tx, ty = torso_pos
+    dx, dy = tx - rx, ty - ry
+    dist   = math.hypot(dx, dy) or 1.0
+    # Backward unit vector (away from torso)
+    bx, by = -dx / dist, -dy / dist
+
+    seg = max(18, int(22 * scale))
+
+    def _step(ox: float, oy: float, angle: float, length: int) -> tuple[float, float]:
+        return (ox + (bx * math.cos(angle) - by * math.sin(angle)) * length,
+                oy + (by * math.cos(angle) + bx * math.sin(angle)) * length)
+
+    base = 0.35
+    mx1, my1 = _step(rx, ry, base, seg)
+    mx2, my2 = _step(mx1, my1, base + cat_tail.angle, seg)
+    tx3, ty3 = _step(mx2, my2, base + cat_tail.angle * 1.6, int(seg * 0.6))
+
+    p0 = (int(rx),  int(ry))
+    p1 = (int(mx1), int(my1))
+    p2 = (int(mx2), int(my2))
+    p3 = (int(tx3), int(ty3))
+
+    for (a, b), wg in [((p0, p1), max(5, int(7 * scale))),
+                        ((p1, p2), max(4, int(6 * scale))),
+                        ((p2, p3), max(3, int(5 * scale)))]:
+        pygame.draw.line(surface, CAT_BODY_GLOW, a, b, wg)
+    for (a, b), wb in [((p0, p1), max(3, int(4 * scale))),
+                        ((p1, p2), max(2, int(3 * scale))),
+                        ((p2, p3), max(2, int(3 * scale)))]:
+        pygame.draw.line(surface, CAT_FUR, a, b, wb)
+    pygame.draw.circle(surface, CAT_TAIL_TIP,  p3, max(4, int(5 * scale)))
+    pygame.draw.circle(surface, CAT_FUR_GLOW,  p3, max(2, int(3 * scale)))
+
+
+def render_cat(surface: pygame.Surface,
+               world_pos: dict[str, tuple[float, float]],
+               scale: float,
+               cat_tail: "CatTail") -> None:
+    """Full pixel-art mystical cat render from world joint positions."""
+    pos = world_pos
+    _render_cat_tail(surface, pos["root"], pos["torso"], cat_tail, scale)
+    render_cat_hip(surface, pos["root"], pos["torso"],
+                   pos["hip_l"], pos["hip_r"], scale)
+    render_cat_torso(surface, pos["root"], pos["torso"],
+                     pos["shoulder_l"], pos["shoulder_r"], scale)
+    # Rear legs
+    render_cat_limb(surface, pos["hip_l"],  pos["knee_l"],  False, scale)
+    render_cat_limb(surface, pos["knee_l"], pos["foot_l"],  True,  scale)
+    render_cat_limb(surface, pos["hip_r"],  pos["knee_r"],  False, scale)
+    render_cat_limb(surface, pos["knee_r"], pos["foot_r"],  True,  scale)
+    # Front legs
+    render_cat_limb(surface, pos["shoulder_l"], pos["elbow_l"], False, scale)
+    render_cat_limb(surface, pos["elbow_l"],    pos["hand_l"],  True,  scale)
+    render_cat_limb(surface, pos["shoulder_r"], pos["elbow_r"], False, scale)
+    render_cat_limb(surface, pos["elbow_r"],    pos["hand_r"],  True,  scale)
+    # Head last (on top)
+    render_cat_head(surface, pos["head"], pos["neck"], scale)
+
+
 # ── Analyzer ───────────────────────────────────────────────────────────────────
 class Analyzer:
     def __init__(self, n_fft: int) -> None:
@@ -1716,6 +1999,9 @@ def _read_samples(n: int):
 
 _fft_buf = np.zeros(N_FFT, dtype=np.float32)
 _an      = Analyzer(N_FFT)
+
+cat_tail = CatTail() if DANCE_CHARACTER == "cat" else None
+sparkles: list = []
 
 # ── pygame surfaces ────────────────────────────────────────────────────────────
 pygame.init()
@@ -1822,10 +2108,17 @@ while True:
         _rx, _ry = root_x_actual, root_y_actual
         world_pos = {n: (2 * _rx - x, 2 * _ry - y) for n, (x, y) in world_pos.items()}
 
+    if DANCE_CHARACTER == "cat" and feat["onset"] and normalized_energy > 0.3:
+        emit_sparkles(world_pos, rng, _total_scale, n=4)
+
     # Draw — trail first, figure on top
     screen.fill((0, 0, 0))
     screen.blit(trail_surface, (0, 0))
-    if SKELETON_MODE:
+    if DANCE_CHARACTER == "cat":
+        cat_tail.update(SKELETON["torso"].angle)
+        render_cat(screen, world_pos, _total_scale, cat_tail)
+        update_and_render_sparkles(screen)
+    elif SKELETON_MODE:
         render_skeleton(screen, world_pos, BONE_COLOR, LINE_WIDTH, HEAD_RADIUS, _total_scale)
     else:
         draw_figure(screen, world_pos)
