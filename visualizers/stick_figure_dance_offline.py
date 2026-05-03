@@ -3,9 +3,9 @@
 #
 # Hierarchical 15-joint skeleton with forward kinematics. Pose library spans
 # Hillgrove's 1864 Victorian ballroom manual and Davis's 1923 early jazz-age
-# manual. Audio energy selects the move category; moves are 4-beat keyframe
-# sequences with ease-out cubic interpolation between beats (Davis p.28:
-# "Take your steps in a gliding manner"). Kaleido stage mirrors into a
+# manual. BASTE framework: per-move easing curves (Body/Energy), root-y level
+# modulation (Space), and locomotor moves that travel across the canvas
+# (Action). Audio energy selects move category; kaleido stage mirrors into a
 # mandala of dancers.
 
 from __future__ import annotations
@@ -38,7 +38,6 @@ SAMPLES_PER_FRAME = int(round(SR / FPS))
 N_FFT             = 2048
 
 # ── Dance params ───────────────────────────────────────────────────────────────
-# Davis p.28: gliding manner; Hillgrove p.59: natural gracefulness → modest blur
 TRAIL_DECAY   = float(os.environ.get("DANCE_TRAIL_DECAY",  0.5))
 _SEED_ENV     = os.environ.get("DANCE_SEED")
 _SEED         = int(_SEED_ENV) if _SEED_ENV else random.randint(0, 2**31 - 1)
@@ -82,8 +81,8 @@ class Joint:
     name:        str
     parent:      str | None
     bone_length: float
-    base_angle:  float   # structural rest-pose angle (radians), accumulated in FK
-    angle:       float   # animation delta added on top of base_angle each frame
+    base_angle:  float
+    angle:       float
 
 
 def _make_skeleton() -> dict[str, Joint]:
@@ -130,8 +129,13 @@ for _jt in SKELETON.values():
     _jt.bone_length *= _total_scale
 
 # Root at canvas center ±10% so limbs span all kaleido wedges.
-root_x = WIDTH  * (0.45 + rng.random() * 0.10)
-root_y = HEIGHT * (0.45 + rng.random() * 0.10)
+root_x_base = WIDTH  * (0.45 + rng.random() * 0.10)
+root_y_base = HEIGHT * (0.45 + rng.random() * 0.10)
+
+# Approximate full figure height (torso + thigh + shin) for level scaling
+_figure_height_px = (SKELETON["torso"].bone_length
+                     + SKELETON["knee_l"].bone_length
+                     + SKELETON["foot_l"].bone_length)
 
 LINE_WIDTH   = max(4, int(8 * _total_scale))
 JOINT_RADIUS = max(3, int(LINE_WIDTH * 0.8))
@@ -142,8 +146,9 @@ _h, _s, _l  = PALETTE_HSL[_ci]
 FIGURE_COLOR = hsl_to_rgb(_h, _s,       min(0.95, _l + 0.20))
 JOINT_COLOR  = hsl_to_rgb(_h, _s * 0.7, min(0.98, _l + 0.40))
 
-print(f"[stick_figure_dance] Root ({root_x:.0f},{root_y:.0f})  "
-      f"line_w={LINE_WIDTH}  head_r={HEAD_RADIUS}", flush=True)
+print(f"[stick_figure_dance] Root ({root_x_base:.0f},{root_y_base:.0f})  "
+      f"line_w={LINE_WIDTH}  head_r={HEAD_RADIUS}  fig_h={_figure_height_px:.0f}px",
+      flush=True)
 
 # ── Forward kinematics ─────────────────────────────────────────────────────────
 def compute_world_positions(rx: float, ry: float) -> dict[str, tuple[float, float]]:
@@ -170,10 +175,7 @@ MOVES: dict[str, list[dict[str, float]]] = {
     # HILLGROVE 1864 — Formal Victorian Ballroom
     # ================================================================
 
-    # Five Positions (Hillgrove p.58, Davis p.29): heels together,
-    # slide right, third position, fourth position forward.
     "hillgrove_five_positions": [
-        # Beat 1: First Position
         {"torso": 0.0, "neck": 0.0, "head": 0.0,
          "shoulder_l": 0.15, "shoulder_r": -0.15,
          "elbow_l": 0.4,  "elbow_r": 0.4,
@@ -181,7 +183,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "hip_l": 0.0,    "hip_r": 0.0,
          "knee_l": 0.0,   "knee_r": 0.0,
          "foot_l": 0.0,   "foot_r": 0.0},
-        # Beat 2: Second Position (right foot slid right)
         {"torso": -0.05, "neck": 0.0, "head": 0.0,
          "shoulder_l": 0.2,  "shoulder_r": -0.4,
          "elbow_l": 0.4,  "elbow_r": 0.5,
@@ -189,7 +190,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "hip_l": 0.05,   "hip_r": -0.4,
          "knee_l": -0.2,  "knee_r": -0.05,
          "foot_l": 0.1,   "foot_r": 0.0},
-        # Beat 3: Third Position (right heel to hollow of left)
         {"torso": 0.0, "neck": 0.0, "head": 0.0,
          "shoulder_l": 0.25, "shoulder_r": -0.25,
          "elbow_l": 0.4,  "elbow_r": 0.4,
@@ -197,8 +197,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "hip_l": 0.05,   "hip_r": -0.15,
          "knee_l": -0.1,  "knee_r": -0.15,
          "foot_l": 0.0,   "foot_r": 0.05},
-        # Beat 4: Fourth Position forward (right foot forward,
-        # opposition: left arm forward)
         {"torso": 0.05, "neck": -0.05, "head": -0.05,
          "shoulder_l": 0.7,  "shoulder_r": -0.3,
          "elbow_l": 0.5,  "elbow_r": 0.4,
@@ -208,10 +206,7 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "foot_l": 0.0,   "foot_r": 0.0},
     ],
 
-    # The Bow (Hillgrove p.51): Gentleman's salute. Left foot sideways,
-    # right drawn to first position, body bends forward, eyes down.
     "hillgrove_bow": [
-        # Beat 1: Preparation — left foot sideways
         {"torso": 0.05, "neck": 0.0, "head": 0.0,
          "shoulder_l": 0.2,  "shoulder_r": -0.2,
          "elbow_l": 0.6,  "elbow_r": 0.6,
@@ -219,7 +214,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "hip_l": 0.3,    "hip_r": -0.05,
          "knee_l": -0.1,  "knee_r": -0.05,
          "foot_l": 0.0,   "foot_r": 0.0},
-        # Beat 2: Right drawn to first position
         {"torso": 0.1, "neck": 0.1, "head": 0.1,
          "shoulder_l": 0.3,  "shoulder_r": -0.3,
          "elbow_l": 0.8,  "elbow_r": 0.8,
@@ -227,7 +221,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "hip_l": 0.05,   "hip_r": -0.05,
          "knee_l": -0.05, "knee_r": -0.05,
          "foot_l": 0.0,   "foot_r": 0.0},
-        # Beat 3: The bow — body bends forward, knees stretched, eyes down
         {"torso": 0.55, "neck": 0.5, "head": 0.5,
          "shoulder_l": 0.4,  "shoulder_r": -0.4,
          "elbow_l": 1.0,  "elbow_r": 1.0,
@@ -235,7 +228,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "hip_l": 0.05,   "hip_r": -0.05,
          "knee_l": 0.0,   "knee_r": 0.0,
          "foot_l": 0.0,   "foot_r": 0.0},
-        # Beat 4: Recovery — body raised, eyes forward
         {"torso": 0.0, "neck": 0.0, "head": 0.0,
          "shoulder_l": 0.2,  "shoulder_r": -0.2,
          "elbow_l": 0.5,  "elbow_r": 0.5,
@@ -245,10 +237,7 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "foot_l": 0.0,   "foot_r": 0.0},
     ],
 
-    # The Courtesy (Hillgrove p.53): Lady's salute. Right foot sideways,
-    # weight transfers left → right → left, both knees bend (the sink).
     "hillgrove_courtesy": [
-        # Beat 1: Right foot slides sideways
         {"torso": 0.05, "neck": 0.05, "head": 0.05,
          "shoulder_l": 0.4,  "shoulder_r": -0.4,
          "elbow_l": 0.6,  "elbow_r": 0.6,
@@ -256,7 +245,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "hip_l": 0.05,   "hip_r": -0.4,
          "knee_l": -0.1,  "knee_r": -0.05,
          "foot_l": 0.0,   "foot_r": 0.0},
-        # Beat 2: Weight on right, left to fourth rear, toes resting
         {"torso": 0.05, "neck": 0.1, "head": 0.1,
          "shoulder_l": 0.4,  "shoulder_r": -0.4,
          "elbow_l": 0.6,  "elbow_r": 0.6,
@@ -264,7 +252,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "hip_l": -0.4,   "hip_r": -0.05,
          "knee_l": -0.2,  "knee_r": -0.1,
          "foot_l": 0.3,   "foot_r": 0.0},
-        # Beat 3: The sink — both knees deeply bent
         {"torso": 0.15, "neck": 0.2, "head": 0.2,
          "shoulder_l": 0.4,  "shoulder_r": -0.4,
          "elbow_l": 0.6,  "elbow_r": 0.6,
@@ -272,7 +259,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "hip_l": -0.2,   "hip_r": 0.05,
          "knee_l": -0.7,  "knee_r": -0.5,
          "foot_l": 0.5,   "foot_r": 0.0},
-        # Beat 4: Return — first position
         {"torso": 0.0, "neck": 0.0, "head": 0.0,
          "shoulder_l": 0.3,  "shoulder_r": -0.3,
          "elbow_l": 0.5,  "elbow_r": 0.5,
@@ -282,10 +268,7 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "foot_l": 0.0,   "foot_r": 0.0},
     ],
 
-    # The Passing Bow (Hillgrove p.56): Salute while in motion.
-    # Left stepping forward, body turns toward person, head inclines.
     "hillgrove_passing_bow": [
-        # Beat 1: Approach with left stepping forward
         {"torso": -0.1, "neck": -0.1, "head": -0.1,
          "shoulder_l": 0.3,  "shoulder_r": -0.4,
          "elbow_l": 0.5,  "elbow_r": 0.5,
@@ -293,7 +276,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "hip_l": 0.4,    "hip_r": -0.1,
          "knee_l": -0.15, "knee_r": -0.15,
          "foot_l": 0.05,  "foot_r": 0.0},
-        # Beat 2: Body turns toward (left), head inclines
         {"torso": -0.2, "neck": -0.15, "head": -0.3,
          "shoulder_l": 0.3,  "shoulder_r": -0.5,
          "elbow_l": 0.6,  "elbow_r": 0.7,
@@ -301,7 +283,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "hip_l": 0.3,    "hip_r": -0.05,
          "knee_l": -0.1,  "knee_r": -0.25,
          "foot_l": -0.05, "foot_r": 0.05},
-        # Beat 3: Hold bow
         {"torso": -0.2, "neck": -0.15, "head": -0.3,
          "shoulder_l": 0.3,  "shoulder_r": -0.5,
          "elbow_l": 0.6,  "elbow_r": 0.7,
@@ -309,7 +290,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "hip_l": 0.3,    "hip_r": -0.05,
          "knee_l": -0.1,  "knee_r": -0.25,
          "foot_l": -0.05, "foot_r": 0.05},
-        # Beat 4: Continue past, recovering posture
         {"torso": 0.0, "neck": 0.0, "head": 0.0,
          "shoulder_l": 0.4,  "shoulder_r": -0.4,
          "elbow_l": 0.5,  "elbow_r": 0.5,
@@ -319,9 +299,7 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "foot_l": 0.0,   "foot_r": 0.0},
     ],
 
-    # Battement (Hillgrove p.59): One foot raised, supported on other.
     "hillgrove_battement": [
-        # Beat 1: First position
         {"torso": 0.0, "neck": 0.0, "head": 0.0,
          "shoulder_l": 0.2,  "shoulder_r": -0.2,
          "elbow_l": 0.4,  "elbow_r": 0.4,
@@ -329,7 +307,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "hip_l": 0.0,    "hip_r": 0.0,
          "knee_l": 0.0,   "knee_r": 0.0,
          "foot_l": 0.0,   "foot_r": 0.0},
-        # Beat 2: Left foot raised, right arm forward (opposition)
         {"torso": -0.1, "neck": 0.05, "head": 0.05,
          "shoulder_l": -0.2, "shoulder_r": 0.7,
          "elbow_l": 0.5,  "elbow_r": 0.4,
@@ -337,7 +314,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "hip_l": 0.6,    "hip_r": -0.1,
          "knee_l": -0.2,  "knee_r": -0.05,
          "foot_l": -0.2,  "foot_r": 0.0},
-        # Beat 3: Hold raised position
         {"torso": -0.1, "neck": 0.05, "head": 0.05,
          "shoulder_l": -0.2, "shoulder_r": 0.7,
          "elbow_l": 0.5,  "elbow_r": 0.4,
@@ -345,7 +321,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "hip_l": 0.6,    "hip_r": -0.1,
          "knee_l": -0.2,  "knee_r": -0.05,
          "foot_l": -0.2,  "foot_r": 0.0},
-        # Beat 4: Lower back to first
         {"torso": 0.0, "neck": 0.0, "head": 0.0,
          "shoulder_l": 0.2,  "shoulder_r": -0.2,
          "elbow_l": 0.4,  "elbow_r": 0.4,
@@ -359,8 +334,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
     # DAVIS 1923 — Early Jazz Age Modern Dances
     # ================================================================
 
-    # The Two-Step (Davis p.30): Foundation of modern dances.
-    # Slide left to second; bring right to third; slide left to fourth.
     "davis_two_step": [
         {"torso": 0.0, "neck": 0.05, "head": 0.05,
          "shoulder_l": 0.5,  "shoulder_r": -0.3,
@@ -392,8 +365,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "foot_l": 0.0,   "foot_r": 0.0},
     ],
 
-    # The Waltz Turn (Davis p.32): Slide left forward; draw right toe
-    # to left heel; half-circle on ball of left; slide right forward.
     "davis_waltz_turn": [
         {"torso": 0.05, "neck": 0.05, "head": 0.05,
          "shoulder_l": -0.2, "shoulder_r": 0.5,
@@ -425,8 +396,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "foot_l": 0.0,   "foot_r": 0.05},
     ],
 
-    # The Hesitation Waltz (Davis p.34): Forward, forward, hesitate,
-    # hesitate. The held balance is the visual point.
     "davis_hesitation_waltz": [
         {"torso": 0.05, "neck": -0.05, "head": -0.05,
          "shoulder_l": 0.5,  "shoulder_r": -0.3,
@@ -442,7 +411,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "hip_l": 0.4,    "hip_r": -0.15,
          "knee_l": -0.15, "knee_r": -0.1,
          "foot_l": 0.05,  "foot_r": 0.0},
-        # The hesitation — left foot raised slightly, held balance
         {"torso": 0.0, "neck": 0.0, "head": 0.0,
          "shoulder_l": 0.4,  "shoulder_r": -0.4,
          "elbow_l": 0.5,  "elbow_r": 0.5,
@@ -450,7 +418,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "hip_l": 0.3,    "hip_r": -0.05,
          "knee_l": -0.4,  "knee_r": -0.05,
          "foot_l": 0.2,   "foot_r": 0.0},
-        # Continue holding
         {"torso": 0.0, "neck": 0.0, "head": 0.0,
          "shoulder_l": 0.4,  "shoulder_r": -0.4,
          "elbow_l": 0.5,  "elbow_r": 0.5,
@@ -460,8 +427,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "foot_l": 0.2,   "foot_r": 0.0},
     ],
 
-    # The Tango Cortez (Davis p.37): Back on right; weight to side on
-    # left; back to right; hold posed forward. Dramatic pause on beat 4.
     "davis_tango_cortez": [
         {"torso": -0.1, "neck": -0.1, "head": -0.1,
          "shoulder_l": 0.4,  "shoulder_r": -0.5,
@@ -484,7 +449,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "hip_l": 0.3,    "hip_r": -0.4,
          "knee_l": -0.1,  "knee_r": -0.25,
          "foot_l": 0.0,   "foot_r": 0.1},
-        # The dramatic tango pause
         {"torso": 0.1, "neck": -0.1, "head": -0.1,
          "shoulder_l": -0.4, "shoulder_r": 0.4,
          "elbow_l": 0.7,  "elbow_r": 0.4,
@@ -494,8 +458,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "foot_l": 0.0,   "foot_r": -0.1},
     ],
 
-    # The Lame Duck (Davis p.36): Sliding dip.
-    # Forward right with deep dip, hold, recover on left.
     "davis_lame_duck": [
         {"torso": 0.15, "neck": -0.1, "head": -0.1,
          "shoulder_l": 0.5,  "shoulder_r": -0.2,
@@ -504,7 +466,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "hip_l": -0.2,   "hip_r": 0.3,
          "knee_l": -0.2,  "knee_r": -0.5,
          "foot_l": 0.1,   "foot_r": 0.3},
-        # Deep dip position
         {"torso": 0.2, "neck": -0.15, "head": -0.15,
          "shoulder_l": 0.6,  "shoulder_r": -0.3,
          "elbow_l": 0.5,  "elbow_r": 0.4,
@@ -528,8 +489,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "foot_l": 0.0,   "foot_r": 0.0},
     ],
 
-    # The One-Step Strut (Davis p.45): Fast walk forward,
-    # "the walk has the appearance of strutting." Four confident steps.
     "davis_one_step_strut": [
         {"torso": 0.1, "neck": -0.05, "head": -0.05,
          "shoulder_l": 0.6,  "shoulder_r": -0.4,
@@ -561,8 +520,6 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "foot_l": 0.05,  "foot_r": 0.0},
     ],
 
-    # The Twirl (Davis p.45): Spin from left to right, right foot
-    # rigid, left propels around. Progressive torso rotation.
     "davis_twirl": [
         {"torso": 0.0, "neck": 0.0, "head": 0.0,
          "shoulder_l": 0.3,  "shoulder_r": -0.3,
@@ -593,26 +550,190 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "knee_l": -0.15, "knee_r": -0.15,
          "foot_l": 0.05,  "foot_r": 0.0},
     ],
+
+    # ================================================================
+    # LOCOMOTOR MOVES — travel across the canvas
+    # ================================================================
+
+    # Promenade: steady rightward walk with opposition arms
+    "promenade_traveling": [
+        {"torso": 0.05, "neck": -0.05, "head": -0.05,
+         "shoulder_l": 0.6,  "shoulder_r": -0.4,
+         "elbow_l": 0.5,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": -0.2,   "hip_r": 0.5,
+         "knee_l": -0.1,  "knee_r": -0.3,
+         "foot_l": 0.0,   "foot_r": 0.1},
+        {"torso": -0.05, "neck": 0.05, "head": 0.05,
+         "shoulder_l": -0.4, "shoulder_r": 0.6,
+         "elbow_l": 0.5,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.5,    "hip_r": -0.2,
+         "knee_l": -0.3,  "knee_r": -0.1,
+         "foot_l": 0.1,   "foot_r": 0.0},
+        {"torso": 0.05, "neck": -0.05, "head": -0.05,
+         "shoulder_l": 0.6,  "shoulder_r": -0.4,
+         "elbow_l": 0.5,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": -0.2,   "hip_r": 0.5,
+         "knee_l": -0.1,  "knee_r": -0.3,
+         "foot_l": 0.0,   "foot_r": 0.1},
+        {"torso": -0.05, "neck": 0.05, "head": 0.05,
+         "shoulder_l": -0.4, "shoulder_r": 0.6,
+         "elbow_l": 0.5,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.5,    "hip_r": -0.2,
+         "knee_l": -0.3,  "knee_r": -0.1,
+         "foot_l": 0.1,   "foot_r": 0.0},
+    ],
+
+    # Leap: crouch → launch → peak → land, arcing forward
+    "leap": [
+        {"torso": 0.1, "neck": -0.05, "head": -0.05,
+         "shoulder_l": -0.3, "shoulder_r": 0.3,
+         "elbow_l": 0.6,  "elbow_r": 0.6,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.1,    "hip_r": -0.1,
+         "knee_l": -0.6,  "knee_r": -0.6,
+         "foot_l": 0.4,   "foot_r": 0.4},
+        {"torso": -0.05, "neck": -0.1, "head": -0.1,
+         "shoulder_l": 1.2,  "shoulder_r": -1.2,
+         "elbow_l": 0.2,  "elbow_r": 0.2,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": -0.4,   "hip_r": 0.4,
+         "knee_l": -0.05, "knee_r": -0.05,
+         "foot_l": -0.1,  "foot_r": 0.1},
+        {"torso": 0.0, "neck": -0.15, "head": -0.15,
+         "shoulder_l": 1.4,  "shoulder_r": -1.4,
+         "elbow_l": 0.1,  "elbow_r": 0.1,
+         "hand_l": 0.1,   "hand_r": -0.1,
+         "hip_l": -0.5,   "hip_r": 0.5,
+         "knee_l": 0.0,   "knee_r": 0.0,
+         "foot_l": -0.15, "foot_r": 0.15},
+        {"torso": 0.05, "neck": 0.0, "head": 0.0,
+         "shoulder_l": 0.4,  "shoulder_r": -0.4,
+         "elbow_l": 0.5,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.05,   "hip_r": -0.05,
+         "knee_l": -0.4,  "knee_r": -0.4,
+         "foot_l": 0.2,   "foot_r": 0.2},
+    ],
+
+    # Spiral walk: three rotating steps traveling left
+    "spiral_traveling": [
+        {"torso": -0.2, "neck": -0.15, "head": -0.15,
+         "shoulder_l": 0.5,  "shoulder_r": -0.7,
+         "elbow_l": 0.6,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.4,    "hip_r": -0.15,
+         "knee_l": -0.2,  "knee_r": -0.1,
+         "foot_l": 0.05,  "foot_r": 0.0},
+        {"torso": 0.1, "neck": 0.1, "head": 0.1,
+         "shoulder_l": 0.6,  "shoulder_r": -0.6,
+         "elbow_l": 0.5,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": -0.1,   "hip_r": 0.3,
+         "knee_l": -0.15, "knee_r": -0.2,
+         "foot_l": 0.0,   "foot_r": 0.05},
+        {"torso": -0.1, "neck": 0.1, "head": 0.1,
+         "shoulder_l": -0.4, "shoulder_r": 0.6,
+         "elbow_l": 0.5,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.4,    "hip_r": -0.15,
+         "knee_l": -0.2,  "knee_r": -0.1,
+         "foot_l": 0.05,  "foot_r": 0.0},
+        {"torso": 0.0, "neck": 0.0, "head": 0.0,
+         "shoulder_l": 0.3,  "shoulder_r": -0.3,
+         "elbow_l": 0.5,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.05,   "hip_r": -0.05,
+         "knee_l": -0.15, "knee_r": -0.15,
+         "foot_l": 0.0,   "foot_r": 0.0},
+    ],
+}
+
+# ── BASTE: per-move easing curves (Energy/Time quality) ───────────────────────
+EASING_CURVES = {
+    "ease_out_cubic": lambda t: 1.0 - (1.0 - t) ** 3,
+    "ease_in_out":    lambda t: t * t * (3.0 - 2.0 * t),
+    "snap_hold":      lambda t: min(1.0, t * 4.0) ** 0.5,   # fast attack → hold
+    "linear":         lambda t: t,
+    "elastic":        lambda t: 1.0 - math.cos(t * math.pi / 2.0) ** 2,
+    "suspended":      lambda t: t * t * t,                    # slow build → catch
+}
+
+MOVE_EASING: dict[str, str] = {
+    "hillgrove_five_positions":  "ease_in_out",
+    "hillgrove_bow":             "suspended",
+    "hillgrove_courtesy":        "ease_in_out",
+    "hillgrove_passing_bow":     "ease_in_out",
+    "hillgrove_battement":       "ease_out_cubic",
+    "davis_two_step":            "ease_out_cubic",
+    "davis_waltz_turn":          "ease_in_out",
+    "davis_hesitation_waltz":    "suspended",
+    "davis_tango_cortez":        "snap_hold",
+    "davis_lame_duck":           "elastic",
+    "davis_one_step_strut":      "linear",
+    "davis_twirl":               "ease_out_cubic",
+    "promenade_traveling":       "ease_in_out",
+    "leap":                      "elastic",
+    "spiral_traveling":          "ease_in_out",
+}
+
+# ── BASTE: per-beat level offsets (Space — height/depth) ─────────────────────
+# 0.0 = standing; positive = lower (crouch/dip); negative = higher (jump).
+# Applied as a fraction of _figure_height_px * 0.5.
+MOVE_LEVELS: dict[str, list[float]] = {
+    "hillgrove_five_positions":  [0.0,  0.0,  0.0,  0.0],
+    "hillgrove_bow":             [0.0,  0.0,  0.0,  0.0],
+    "hillgrove_courtesy":        [0.0,  0.05, 0.15, 0.0],
+    "hillgrove_passing_bow":     [0.0,  0.0,  0.0,  0.0],
+    "hillgrove_battement":       [0.0,  0.0,  0.0,  0.0],
+    "davis_two_step":            [0.0,  0.0,  0.0,  0.0],
+    "davis_waltz_turn":          [0.0,  0.0,  0.0,  0.0],
+    "davis_hesitation_waltz":    [0.0,  0.0,  0.0,  0.0],
+    "davis_tango_cortez":        [0.05, 0.0,  0.05, 0.1],
+    "davis_lame_duck":           [0.1,  0.2,  0.05, 0.0],
+    "davis_one_step_strut":      [0.0,  0.0,  0.0,  0.0],
+    "davis_twirl":               [0.0, -0.05,-0.1,  0.0],
+    "promenade_traveling":       [0.0,  0.0,  0.0,  0.0],
+    "leap":                      [0.1, -0.3, -0.4,  0.05],
+    "spiral_traveling":          [0.0,  0.05, 0.05, 0.0],
+}
+
+# ── BASTE: per-beat travel (Action — locomotor displacement) ─────────────────
+# Fraction of WIDTH to translate root_x per beat.  Positive = right.
+MOVE_TRAVEL: dict[str, list[float]] = {
+    "hillgrove_five_positions":  [0.0,   0.0,   0.0,   0.0],
+    "hillgrove_bow":             [0.0,   0.0,   0.0,   0.0],
+    "hillgrove_courtesy":        [0.0,   0.0,   0.0,   0.0],
+    "hillgrove_passing_bow":     [0.0,   0.05,  0.05,  0.05],
+    "hillgrove_battement":       [0.0,   0.0,   0.0,   0.0],
+    "davis_two_step":            [0.0,   0.0,   0.0,   0.0],
+    "davis_waltz_turn":          [0.0,   0.0,   0.0,   0.0],
+    "davis_hesitation_waltz":    [0.0,   0.0,   0.0,   0.0],
+    "davis_tango_cortez":        [0.0,   0.0,   0.0,   0.0],
+    "davis_lame_duck":           [0.0,   0.0,   0.0,   0.0],
+    "davis_one_step_strut":      [0.04,  0.04,  0.04,  0.04],
+    "davis_twirl":               [0.0,   0.0,   0.0,   0.0],
+    "promenade_traveling":       [0.06,  0.06,  0.06,  0.06],
+    "leap":                      [0.0,   0.05,  0.1,   0.05],
+    "spiral_traveling":          [-0.04,-0.04, -0.04, -0.04],
 }
 
 # ── Category lookup — weighted by audio energy ─────────────────────────────────
 HILLGROVE_FORMAL   = [
-    "hillgrove_five_positions",
-    "hillgrove_bow",
-    "hillgrove_courtesy",
-    "hillgrove_passing_bow",
-    "hillgrove_battement",
+    "hillgrove_five_positions", "hillgrove_bow", "hillgrove_courtesy",
+    "hillgrove_passing_bow",    "hillgrove_battement",
 ]
 DAVIS_TRANSITIONAL = [
-    "davis_two_step",
-    "davis_waltz_turn",
-    "davis_hesitation_waltz",
+    "davis_two_step", "davis_waltz_turn", "davis_hesitation_waltz",
 ]
 DAVIS_DRAMATIC     = [
-    "davis_tango_cortez",
-    "davis_lame_duck",
-    "davis_one_step_strut",
-    "davis_twirl",
+    "davis_tango_cortez", "davis_lame_duck", "davis_one_step_strut", "davis_twirl",
+]
+LOCOMOTOR          = [
+    "promenade_traveling", "leap", "spiral_traveling",
 ]
 
 
@@ -623,26 +744,24 @@ class DanceState:
         self.current_move = "hillgrove_five_positions"
         self.move_beat    = 0
         first             = dict(MOVES[self.current_move][0])
-        self.start_pose   = dict(first)   # pose at start of this beat's interpolation
-        self.target_pose  = dict(first)   # pose we're interpolating toward
-        self.current_pose = dict(first)   # last applied pose (snapshot for next start)
+        self.start_pose   = dict(first)
+        self.target_pose  = dict(first)
+        self.current_pose = dict(first)
+        self.last_t       = 0.0   # most recent eased beat_phase value
         self.recent_moves: list[str] = []
 
     def pick_next_move(self, energy: float) -> str:
-        # energy < 0.3 → mostly Hillgrove formal
-        # 0.3-0.6    → Davis transitional + occasional Hillgrove
-        # > 0.6      → Davis dramatic + transitional
         if energy < 0.3:
             pool    = HILLGROVE_FORMAL + DAVIS_TRANSITIONAL[:1]
             weights = [3] * len(HILLGROVE_FORMAL) + [1]
         elif energy < 0.6:
-            pool    = DAVIS_TRANSITIONAL + HILLGROVE_FORMAL[:2] + DAVIS_DRAMATIC[:1]
-            weights = [3] * len(DAVIS_TRANSITIONAL) + [2, 2, 1]
+            pool    = (DAVIS_TRANSITIONAL + HILLGROVE_FORMAL[:2]
+                       + DAVIS_DRAMATIC[:1] + LOCOMOTOR[:1])
+            weights = [3] * len(DAVIS_TRANSITIONAL) + [2, 2, 1, 2]
         else:
-            pool    = DAVIS_DRAMATIC + DAVIS_TRANSITIONAL[:1]
-            weights = [3] * len(DAVIS_DRAMATIC) + [1]
+            pool    = DAVIS_DRAMATIC + DAVIS_TRANSITIONAL[:1] + LOCOMOTOR
+            weights = [3] * len(DAVIS_DRAMATIC) + [1, 2, 3, 2]
 
-        # Suppress two most-recently-played moves
         wts = list(weights)
         for recent in self.recent_moves[-2:]:
             if recent in pool:
@@ -669,19 +788,21 @@ class DanceState:
             self.current_move = self.pick_next_move(energy)
             self.move_beat    = 0
         self.target_pose = dict(MOVES[self.current_move][self.move_beat])
+        self.last_t      = 0.0
 
     def update(self, beat_phase: float) -> dict[str, float]:
-        # Ease-out cubic: Davis p.28 "gliding manner" — fast start, gentle settle
-        t      = 1.0 - (1.0 - beat_phase) ** 3
-        result = {}
+        easing_fn  = EASING_CURVES[MOVE_EASING.get(self.current_move, "ease_out_cubic")]
+        t          = easing_fn(max(0.0, min(1.0, beat_phase)))
+        self.last_t = t
+        result     = {}
         for joint, tgt in self.target_pose.items():
-            start       = self.start_pose.get(joint, 0.0)
+            start        = self.start_pose.get(joint, 0.0)
             result[joint] = start * (1.0 - t) + tgt * t
         self.current_pose = result
         return result
 
 
-# ── Beat tracker (inter-onset-interval estimator) ──────────────────────────────
+# ── Beat tracker ───────────────────────────────────────────────────────────────
 class BeatTracker:
     def __init__(self) -> None:
         self.onsets:       list[float] = []
@@ -706,8 +827,8 @@ class BeatTracker:
         return ((t - self.phase_anchor) / beat_period) % 1.0
 
 
-beat_tracker  = BeatTracker()
-dance_state   = DanceState(rng)
+beat_tracker = BeatTracker()
+dance_state  = DanceState(rng)
 
 # ── Smoothed audio band state ──────────────────────────────────────────────────
 lag_state = {"bass": 0.0, "mid": 0.0, "high": 0.0}
@@ -789,7 +910,6 @@ trail_surface = pygame.Surface((WIDTH, HEIGHT))
 trail_surface.fill((0, 0, 0))
 trail_surface.set_alpha(int(255 * TRAIL_DECAY))
 
-# Label font for DANCE_LABEL debug overlay (pre-created to avoid per-frame init)
 _label_font = (pygame.font.SysFont("monospace", 18)
                if os.environ.get("DANCE_LABEL") == "1" else None)
 
@@ -812,11 +932,14 @@ _proc = subprocess.Popen(
 )
 
 # ── Main render loop ───────────────────────────────────────────────────────────
-frame_idx      = 0
-render_start   = time.time()
-window_start   = render_start
-window_frames  = 0
+frame_idx       = 0
+render_start    = time.time()
+window_start    = render_start
+window_frames   = 0
 prev_beat_phase = 0.0
+prev_t          = 0.0    # eased beat_phase at previous frame (for travel delta)
+root_x_offset   = 0.0   # accumulated lateral travel (pixels)
+root_y_offset   = 0.0   # current level offset (pixels, positive = down)
 
 while True:
     sam = _read_samples(SAMPLES_PER_FRAME)
@@ -827,45 +950,65 @@ while True:
     _fft_buf[-len(sam):] = sam
     feat = _an.update(np.abs(np.fft.rfft(_fft_buf)))
 
-    t = frame_idx / FPS
-    beat_tracker.update(t, bool(feat["onset"]))
+    t_sec = frame_idx / FPS
+    beat_tracker.update(t_sec, bool(feat["onset"]))
 
     lag_state["bass"] = _alag(lag_state["bass"], feat["low"])
     lag_state["mid"]  = _alag(lag_state["mid"],  feat["mid"])
     lag_state["high"] = _alag(lag_state["high"], feat["high"])
 
-    beat_phase = beat_tracker.beat_phase(t)
+    beat_phase = beat_tracker.beat_phase(t_sec)
 
-    # Detect beat crossing (phase wraps back to near-0 or onset resets anchor)
+    # Detect beat crossing — reset travel accumulator for clean delta tracking
     if beat_phase < prev_beat_phase:
         dance_state.on_new_beat(feat["energy"])
+        prev_t = 0.0
     prev_beat_phase = beat_phase
 
-    # Apply pose to skeleton joints
+    # Pose update (also sets dance_state.last_t)
     pose = dance_state.update(beat_phase)
+    t    = dance_state.last_t
+
     for jn, ang in pose.items():
         if jn in SKELETON:
             SKELETON[jn].angle = ang
 
-    # Small audio-reactive knee overlay (Davis p.27: "movement from below the hips")
+    # Davis p.27: small knee overlay ("movement from below the hips")
     kb = lag_state["bass"] * 0.04 * math.sin(beat_phase * math.tau)
     SKELETON["knee_l"].angle -= kb
     SKELETON["knee_r"].angle += kb
 
-    world_pos = compute_world_positions(root_x, root_y)
+    # ── BASTE / Action: locomotor travel ──────────────────────────────────────
+    travel_norm = MOVE_TRAVEL[dance_state.current_move][dance_state.move_beat]
+    root_x_offset += travel_norm * WIDTH * (t - prev_t)
+    # Wrap at ±40% canvas so long travels stay visible
+    if root_x_offset > WIDTH * 0.4:
+        root_x_offset = -WIDTH * 0.4
+    elif root_x_offset < -WIDTH * 0.4:
+        root_x_offset = WIDTH * 0.4
+
+    # ── BASTE / Space: level modulation ───────────────────────────────────────
+    level_norm      = MOVE_LEVELS[dance_state.current_move][dance_state.move_beat]
+    level_target_px = level_norm * _figure_height_px * 0.5
+    root_y_offset   = root_y_offset * (1.0 - t) + level_target_px * t
+
+    prev_t = t
+
+    root_x_actual = root_x_base + root_x_offset
+    root_y_actual = root_y_base + root_y_offset
+
+    world_pos = compute_world_positions(root_x_actual, root_y_actual)
 
     # Draw — trail first, figure on top
     screen.fill((0, 0, 0))
     screen.blit(trail_surface, (0, 0))
     draw_figure(screen, world_pos)
 
-    # DANCE_LABEL debug overlay
     if _label_font is not None:
         lbl  = f"{dance_state.current_move} [{dance_state.move_beat}]"
         surf = _label_font.render(lbl, True, (200, 200, 200))
         screen.blit(surf, (20, 20))
 
-    # Capture into trail for next frame
     trail_surface.set_alpha(255)
     trail_surface.blit(screen, (0, 0))
     trail_surface.set_alpha(int(255 * TRAIL_DECAY))
@@ -883,7 +1026,8 @@ while True:
             f"  bpm={beat_tracker.bpm:.1f}  ph={beat_phase:.2f}"
             f"  E={feat['energy']:.3f}"
             f"  B={lag_state['bass']:.3f} M={lag_state['mid']:.3f}"
-            f"  move={dance_state.current_move}[{dance_state.move_beat}]",
+            f"  move={dance_state.current_move}[{dance_state.move_beat}]"
+            f"  rx_off={root_x_offset:+.0f}  ry_off={root_y_offset:+.0f}",
             flush=True,
         )
         window_start  = now
