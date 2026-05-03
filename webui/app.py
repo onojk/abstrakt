@@ -33,7 +33,7 @@ KALEIDO_DEFAULTS = {
 }
 
 
-VISUALIZERS = ["warpfield", "02_kaleidoscope_spokes", "09_beat_reactive", "plasma", "plasma_warm", "camo_plasma"]
+VISUALIZERS = ["warpfield", "02_kaleidoscope_spokes", "09_beat_reactive", "plasma", "plasma_warm", "camo_plasma", "glitch_scroll", "chaos_explosions"]
 
 MAX_UPLOAD_MB = 100
 
