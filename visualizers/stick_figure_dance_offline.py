@@ -1325,25 +1325,24 @@ def render_long_bone(surface: pygame.Surface,
                      p1: tuple[float, float], p2: tuple[float, float],
                      color: tuple[int, int, int],
                      base_width: int, scale: float) -> None:
-    """Long bone with bulbous joint endings (epiphyses)."""
+    """Long bone: thin diaphysis shaft + prominent bulbous epiphyses at each end."""
     x1, y1 = p1
     x2, y2 = p2
-    shaft_width = max(2, int(base_width * 0.7))
-    pygame.draw.line(surface, color, (int(x1), int(y1)), (int(x2), int(y2)), shaft_width)
-    pygame.draw.aaline(surface, color, (x1, y1), (x2, y2))
-    nodule_radius = max(3, int(base_width * 1.4))
-    pygame.draw.circle(surface, color, (int(x1), int(y1)), nodule_radius)
-    pygame.draw.circle(surface, color, (int(x2), int(y2)), nodule_radius)
+    shaft_w = max(2, int(base_width * 0.5))   # narrower shaft for dumbbell silhouette
+    epi_r   = max(4, int(base_width * 1.6))   # larger epiphyses than before
+    pygame.draw.line(surface, color, (int(x1), int(y1)), (int(x2), int(y2)), shaft_w)
+    pygame.draw.circle(surface, color, (int(x1), int(y1)), epi_r)
+    pygame.draw.circle(surface, color, (int(x2), int(y2)), epi_r)
 
 
 def render_spine(surface: pygame.Surface,
                  root_pos: tuple[float, float], torso_pos: tuple[float, float],
                  color: tuple[int, int, int], scale: float) -> None:
-    """Spine drawn as a series of vertebrae rather than one line."""
+    """Spine: 7 vertebral discs distributed root → torso with slight S-curve."""
     rx, ry = root_pos
     tx, ty = torso_pos
     n_vertebrae = 7
-    vertebra_radius = max(3, int(7 * scale))
+    vertebra_radius = max(3, int(8 * scale))
     for i in range(n_vertebrae):
         t = (i + 0.5) / n_vertebrae
         curve_offset = math.sin(t * math.pi) * 2 * scale
@@ -1361,30 +1360,34 @@ def render_spine(surface: pygame.Surface,
 
 
 def render_ribcage(surface: pygame.Surface,
-                   torso_pos: tuple[float, float], neck_pos: tuple[float, float],
+                   root_pos: tuple[float, float], torso_pos: tuple[float, float],
                    color: tuple[int, int, int], scale: float) -> None:
-    """Ribcage — pairs of curved ribs flaring out from spine."""
-    tx, ty = torso_pos
-    nx, ny = neck_pos
-    dx = nx - tx
-    dy = ny - ty
+    """Ribcage: 6 paired arcs spanning the full root→torso trunk (hip to shoulder)."""
+    rx, ry = root_pos    # pelvis / hip level
+    tx, ty = torso_pos   # shoulder / chest level
+    dx = tx - rx         # direction: root → torso (upward in screen)
+    dy = ty - ry
     spine_len = math.hypot(dx, dy)
     if spine_len < 1:
         return
-    ux = dx / spine_len
+    ux = dx / spine_len   # unit along spine
     uy = dy / spine_len
-    px = -uy
+    px = -uy              # lateral (perpendicular to spine)
     py =  ux
     n_ribs = 6
-    rib_max_half_width = 35 * scale
+    # Rib width proportional to trunk length: ribs are ~60% as wide as trunk is tall
+    rib_max_half_width = spine_len * 0.60
+    rib_line_w = max(1, int(3 * scale))
     for i in range(n_ribs):
-        t = 0.15 + (i / (n_ribs - 1)) * 0.7
-        taper = math.sin(((i + 0.5) / n_ribs) * math.pi) * 0.85 + 0.15
+        # Distribute across 80% of trunk, leaving margin at pelvis & shoulders
+        t = 0.10 + (i / (n_ribs - 1)) * 0.80
+        # Bell taper: widest at mid-chest, narrower at top & bottom
+        taper = math.sin(((i + 0.5) / n_ribs) * math.pi) * 0.80 + 0.20
         half_width = rib_max_half_width * taper
-        spine_x = tx + dx * t
-        spine_y = ty + dy * t
+        spine_x = rx + dx * t
+        spine_y = ry + dy * t
         arc_segments = 6
-        rib_droop = 6 * scale
+        rib_droop = 5 * scale
         for side in [-1, 1]:
             prev_pt: tuple[float, float] = (spine_x, spine_y)
             for j in range(1, arc_segments + 1):
@@ -1393,11 +1396,9 @@ def render_ribcage(surface: pygame.Surface,
                 droop   = math.sin(arc_t * math.pi) * rib_droop
                 x = spine_x + px * lateral + ux * droop
                 y = spine_y + py * lateral + uy * droop
-                pygame.draw.aaline(surface, color, prev_pt, (x, y))
                 pygame.draw.line(surface, color,
                                  (int(prev_pt[0]), int(prev_pt[1])),
-                                 (int(x), int(y)),
-                                 max(1, int(2 * scale)))
+                                 (int(x), int(y)), rib_line_w)
                 prev_pt = (x, y)
 
 
@@ -1405,99 +1406,150 @@ def render_pelvis(surface: pygame.Surface,
                   root_pos: tuple[float, float],
                   hip_l_pos: tuple[float, float], hip_r_pos: tuple[float, float],
                   color: tuple[int, int, int], scale: float) -> None:
-    """Pelvis — bowl shape connecting root to both hip joints."""
-    rx, ry    = root_pos
-    hlx, hly  = hip_l_pos
-    hrx, hry  = hip_r_pos
-    crest_height     = 12 * scale
-    crest_half_width = 18 * scale
-    hip_mid_x = (hlx + hrx) / 2
-    hip_mid_y = (hly + hry) / 2
+    """Pelvis: iliac wings sweeping up from root + pubic arch + acetabulum circles."""
+    rx, ry   = root_pos
+    hlx, hly = hip_l_pos
+    hrx, hry = hip_r_pos
+    hip_mid_x = (hlx + hrx) * 0.5
+    hip_mid_y = (hly + hry) * 0.5
     up_x = rx - hip_mid_x
     up_y = ry - hip_mid_y
     up_len = math.hypot(up_x, up_y)
     if up_len > 0:
-        up_x /= up_len
-        up_y /= up_len
-        side_x = -up_y
-        side_y =  up_x
+        ux = up_x / up_len
+        uy = up_y / up_len
+        sx = -uy
+        sy =  ux
     else:
-        up_x, up_y   = 0, -1
-        side_x, side_y = 1, 0
-    crest_top_l = (rx + up_x * crest_height + side_x * crest_half_width,
-                   ry + up_y * crest_height + side_y * crest_half_width)
-    crest_top_r = (rx + up_x * crest_height - side_x * crest_half_width,
-                   ry + up_y * crest_height - side_y * crest_half_width)
-    pelvis_polygon = [
-        crest_top_l,
-        crest_top_r,
-        (hrx, hry),
-        (rx,  ry),
-        (hlx, hly),
-    ]
-    int_polygon = [(int(x), int(y)) for x, y in pelvis_polygon]
-    pygame.draw.polygon(surface, color, int_polygon, max(2, int(2 * scale)))
+        ux, uy = 0, -1
+        sx, sy = 1,  0
+    hip_half_w = math.hypot(hrx - hlx, hry - hly) * 0.5
+    # Iliac crest tips flare outward and upward from root
+    wing_h  = max(10 * scale, hip_half_w * 0.55)
+    wing_hw = hip_half_w * 1.25
+    crest_l = (rx + sx * (-wing_hw) + ux * wing_h,
+               ry + sy * (-wing_hw) + uy * wing_h)
+    crest_r = (rx + sx * (+wing_hw) + ux * wing_h,
+               ry + sy * (+wing_hw) + uy * wing_h)
+    thick = max(2, int(3 * scale))
+    # Draw each iliac wing: root → crest tip → midpoint → hip socket
+    for crest, hip in ((crest_l, (hlx, hly)), (crest_r, (hrx, hry))):
+        mid_x = (crest[0] + hip[0]) * 0.5
+        mid_y = (crest[1] + hip[1]) * 0.5
+        pygame.draw.line(surface, color,
+                         (int(rx), int(ry)), (int(crest[0]), int(crest[1])), thick)
+        pygame.draw.line(surface, color,
+                         (int(crest[0]), int(crest[1])), (int(mid_x), int(mid_y)), thick)
+        pygame.draw.line(surface, color,
+                         (int(mid_x), int(mid_y)), (int(hip[0]), int(hip[1])), thick)
+    # Pubic arch: hip_l → pubic low point → hip_r
+    pub_depth = hip_half_w * 0.55
+    pub_mid   = (hip_mid_x - ux * pub_depth, hip_mid_y - uy * pub_depth)
+    pygame.draw.line(surface, color,
+                     (int(hlx), int(hly)), (int(pub_mid[0]), int(pub_mid[1])),
+                     max(1, thick - 1))
+    pygame.draw.line(surface, color,
+                     (int(pub_mid[0]), int(pub_mid[1])), (int(hrx), int(hry)),
+                     max(1, thick - 1))
+    # Acetabula: filled circles at hip socket positions
+    socket_r = max(3, int(4 * scale))
+    pygame.draw.circle(surface, color, (int(hlx), int(hly)), socket_r)
+    pygame.draw.circle(surface, color, (int(hrx), int(hry)), socket_r)
 
 
 def render_skull(surface: pygame.Surface,
                  head_pos: tuple[float, float], neck_pos: tuple[float, float],
                  color: tuple[int, int, int], base_radius: int) -> None:
-    """Skull — round cranium with eye sockets, nasal cavity, and teeth."""
+    """Skull: dome polygon + brow ridge + eye sockets + nasal aperture + mandible + teeth."""
     hx, hy = head_pos
     nx, ny = neck_pos
     dx = hx - nx
     dy = hy - ny
     head_len = math.hypot(dx, dy)
-    skull_radius = int(base_radius * 1.6)
-    pygame.draw.circle(surface, color, (int(hx), int(hy)), skull_radius)
-    socket_w    = max(3, int(skull_radius * 0.35))
-    socket_h    = max(2, int(skull_radius * 0.42))
-    socket_y_off = int(skull_radius * 0.05)
-    socket_x_off = int(skull_radius * 0.4)
+    # Larger skull for 480p legibility
+    skull_r = max(20, int(base_radius * 2.0))
     if head_len > 0:
-        down_x = -dx / head_len
+        down_x = -dx / head_len   # direction from head joint toward neck
         down_y = -dy / head_len
-        right_x = -down_y
+        right_x = -down_y          # lateral (perpendicular)
         right_y =  down_x
     else:
-        down_x, down_y   = 0, 1
-        right_x, right_y = 1, 0
-    socket_color = (0, 0, 0)
-    eye_l = (int(hx - right_x * socket_x_off + down_x * socket_y_off),
-             int(hy - right_y * socket_x_off + down_y * socket_y_off))
-    eye_r = (int(hx + right_x * socket_x_off + down_x * socket_y_off),
-             int(hy + right_y * socket_x_off + down_y * socket_y_off))
-    pygame.draw.ellipse(surface, socket_color,
-                        pygame.Rect(eye_l[0] - socket_w // 2, eye_l[1] - socket_h // 2,
-                                    socket_w, socket_h))
-    pygame.draw.ellipse(surface, socket_color,
-                        pygame.Rect(eye_r[0] - socket_w // 2, eye_r[1] - socket_h // 2,
-                                    socket_w, socket_h))
-    nasal_y_off = int(skull_radius * 0.5)
-    nasal_size  = max(2, int(skull_radius * 0.18))
-    nasal_apex  = (int(hx + down_x * (nasal_y_off - nasal_size)),
-                   int(hy + down_y * (nasal_y_off - nasal_size)))
-    nasal_left  = (int(hx + down_x * (nasal_y_off + nasal_size) - right_x * nasal_size // 2),
-                   int(hy + down_y * (nasal_y_off + nasal_size) - right_y * nasal_size // 2))
-    nasal_right = (int(hx + down_x * (nasal_y_off + nasal_size) + right_x * nasal_size // 2),
-                   int(hy + down_y * (nasal_y_off + nasal_size) + right_y * nasal_size // 2))
-    pygame.draw.polygon(surface, socket_color, [nasal_apex, nasal_left, nasal_right])
-    teeth_y_off    = int(skull_radius * 0.85)
-    teeth_half_w   = int(skull_radius * 0.45)
-    n_teeth        = 6
-    for i in range(n_teeth + 1):
-        t_frac  = i / n_teeth
-        tx_off  = (t_frac - 0.5) * 2 * teeth_half_w
-        tooth_x = int(hx + down_x * teeth_y_off + right_x * tx_off)
-        tooth_y = int(hy + down_y * teeth_y_off + right_y * tx_off)
-        pygame.draw.circle(surface, socket_color, (tooth_x, tooth_y),
-                           max(1, int(skull_radius * 0.06)))
+        down_x, down_y   = 0,  1
+        right_x, right_y = 1,  0
+
+    def pt(sx: float, sy: float) -> tuple[int, int]:
+        """Skull-space (sx=lateral, sy=down from head joint) → screen coords."""
+        return (
+            int(hx + right_x * sx * skull_r + down_x * sy * skull_r),
+            int(hy + right_y * sx * skull_r + down_y * sy * skull_r),
+        )
+
+    # ── Cranium polygon: dome top, cheekbones at widest, chin below ──────────────
+    # sy=0 = head joint (top of skull); sy > 0 = toward face/jaw
+    cranium = [
+        pt(-0.60, -0.25),   # upper left
+        pt(-0.88, +0.05),   # left temple (widest)
+        pt(-0.82, +0.45),   # left cheekbone / zygomatic arch
+        pt(-0.58, +0.80),   # lower left face (maxilla)
+        pt(-0.28, +0.98),   # left chin
+        pt( 0.00, +1.04),   # chin center
+        pt(+0.28, +0.98),   # right chin
+        pt(+0.58, +0.80),   # lower right face
+        pt(+0.82, +0.45),   # right cheekbone
+        pt(+0.88, +0.05),   # right temple
+        pt(+0.60, -0.25),   # upper right
+        pt( 0.00, -0.52),   # crown
+    ]
+    pygame.draw.polygon(surface, color, cranium)
+
+    # ── Brow ridge: dark horizontal bar separating dome from eye sockets ─────────
+    pygame.draw.line(surface, (0, 0, 0),
+                     pt(-0.76, +0.26), pt(+0.76, +0.26),
+                     max(2, int(skull_r * 0.10)))
+
+    # ── Eye sockets: large rounded rectangles (most recognizable skull feature) ───
+    eye_w = max(4, int(skull_r * 0.32))
+    eye_h = max(5, int(skull_r * 0.38))
+    for side in (-1.0, +1.0):
+        ecx, ecy = pt(side * 0.33, +0.46)
+        pygame.draw.ellipse(surface, (0, 0, 0),
+                            pygame.Rect(ecx - eye_w // 2, ecy - eye_h // 2,
+                                        eye_w, eye_h))
+
+    # ── Nasal aperture: inverted triangle ────────────────────────────────────────
+    pygame.draw.polygon(surface, (0, 0, 0), [
+        pt( 0.00, +0.60),
+        pt(-0.14, +0.80),
+        pt(+0.14, +0.80),
+    ])
+
+    # ── Mandible: U-shaped arch descending below the cranium ─────────────────────
+    mand_w = max(2, int(skull_r * 0.10))
+    pygame.draw.lines(surface, color, False, [
+        pt(-0.56, +0.82),   # left hinge
+        pt(-0.62, +1.10),   # left ramus
+        pt(-0.50, +1.38),   # left chin
+        pt( 0.00, +1.48),   # chin prominence (mentum)
+        pt(+0.50, +1.38),   # right chin
+        pt(+0.62, +1.10),   # right ramus
+        pt(+0.56, +0.82),   # right hinge
+    ], mand_w)
+
+    # ── Teeth: dark rectangles at maxilla–mandible boundary ──────────────────────
+    n_teeth = 7
+    for i in range(n_teeth):
+        tooth_sx = ((i + 0.5) / n_teeth - 0.5) * 0.50
+        tooth_w  = max(1, int(skull_r * 0.055))
+        tooth_h  = max(1, int(skull_r * 0.08))
+        tcx, tcy = pt(tooth_sx, +0.93)
+        pygame.draw.rect(surface, (0, 0, 0),
+                         pygame.Rect(tcx - tooth_w // 2, tcy, tooth_w, tooth_h))
 
 
 def render_hand_bones(surface: pygame.Surface,
                       wrist_pos: tuple[float, float], elbow_pos: tuple[float, float],
                       color: tuple[int, int, int], scale: float) -> None:
-    """Small finger fan — 5 short bones radiating from wrist."""
+    """Metacarpal fan — 5 finger bones radiating from wrist."""
     wx, wy = wrist_pos
     ex, ey = elbow_pos
     dx = wx - ex
@@ -1509,28 +1561,27 @@ def render_hand_bones(surface: pygame.Surface,
     forward_y = dy / arm_len
     perp_x = -forward_y
     perp_y =  forward_x
-    finger_length = 8 * scale
+    finger_length = max(6 * scale, 5)
     n_fingers = 5
     fan_angle = math.pi / 4
     for i in range(n_fingers):
-        t  = (i / (n_fingers - 1)) - 0.5
+        t     = (i / (n_fingers - 1)) - 0.5
         angle = t * fan_angle
         cos_a = math.cos(angle)
         sin_a = math.sin(angle)
-        finger_dx = forward_x * cos_a - perp_x * sin_a
-        finger_dy = forward_y * cos_a - perp_y * sin_a
-        tip_x = wx + finger_dx * finger_length
-        tip_y = wy + finger_dy * finger_length
-        pygame.draw.aaline(surface, color, (wx, wy), (tip_x, tip_y))
+        fdx = forward_x * cos_a - perp_x * sin_a
+        fdy = forward_y * cos_a - perp_y * sin_a
+        tip_x = wx + fdx * finger_length
+        tip_y = wy + fdy * finger_length
         pygame.draw.line(surface, color,
                          (int(wx), int(wy)), (int(tip_x), int(tip_y)),
-                         max(1, int(scale)))
+                         max(1, int(scale * 1.5)))
 
 
 def render_foot_bones(surface: pygame.Surface,
                       ankle_pos: tuple[float, float], knee_pos: tuple[float, float],
                       color: tuple[int, int, int], scale: float) -> None:
-    """Small foot — toe bones fanning forward + heel nodule."""
+    """Metatarsal fan — 5 toe bones + heel nodule."""
     ax, ay = ankle_pos
     kx, ky = knee_pos
     leg_dx = ax - kx
@@ -1540,11 +1591,11 @@ def render_foot_bones(surface: pygame.Surface,
         return
     foot_forward_x = -leg_dy / leg_len
     foot_forward_y =  leg_dx / leg_len
-    foot_length = 10 * scale
-    n_toes  = 5
+    foot_length = max(8 * scale, 6)
+    n_toes    = 5
     fan_angle = math.pi / 6
     for i in range(n_toes):
-        t  = (i / (n_toes - 1)) - 0.5
+        t     = (i / (n_toes - 1)) - 0.5
         angle = t * fan_angle
         cos_a = math.cos(angle)
         sin_a = math.sin(angle)
@@ -1552,11 +1603,13 @@ def render_foot_bones(surface: pygame.Surface,
         toe_dy = foot_forward_y * cos_a + leg_dy / leg_len * sin_a * 0.3
         tip_x  = ax + toe_dx * foot_length
         tip_y  = ay + toe_dy * foot_length
-        pygame.draw.aaline(surface, color, (ax, ay), (tip_x, tip_y))
+        pygame.draw.line(surface, color,
+                         (int(ax), int(ay)), (int(tip_x), int(tip_y)),
+                         max(1, int(scale * 1.5)))
     heel_x = ax - foot_forward_x * (foot_length * 0.3)
     heel_y = ay - foot_forward_y * (foot_length * 0.3)
     pygame.draw.circle(surface, color, (int(heel_x), int(heel_y)),
-                       max(2, int(2 * scale)))
+                       max(2, int(3 * scale)))
 
 
 def render_skeleton(surface: pygame.Surface,
@@ -1567,7 +1620,8 @@ def render_skeleton(surface: pygame.Surface,
                     scale_factor: float) -> None:
     """Full anatomical skeleton render from world joint positions."""
     render_spine(surface, positions["root"], positions["torso"], line_color, scale_factor)
-    render_ribcage(surface, positions["torso"], positions["neck"], line_color, scale_factor)
+    # Ribcage spans root→torso (full trunk: hip level to shoulder level)
+    render_ribcage(surface, positions["root"], positions["torso"], line_color, scale_factor)
     render_pelvis(surface, positions["root"], positions["hip_l"], positions["hip_r"],
                   line_color, scale_factor)
     render_skull(surface, positions["head"], positions["neck"], line_color, head_radius)
