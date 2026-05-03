@@ -153,25 +153,30 @@ VIDEO_DURATION="${VIDEO_DURATION:-0}"
 say "    Rendered ${VIDEO_DURATION}s of video"
 
 # ── Step 3: Apply kaleido post-processing (mirror + mandala + frei0r) ─────────
-say "3/4  Applying kaleido effects..."
-KALEIDO_OUTPUT="${JOB_DIR}/kaleido_output.mp4"
+if [[ "$APPLY_KDEN" = "1" ]]; then
+  say "3/4  Applying kaleido effects..."
+  KALEIDO_OUTPUT="${JOB_DIR}/kaleido_output.mp4"
 
-RAW_VIDEO_SRC="$RAW_VIDEO" \
-WIDTH="$WIDTH" \
-HEIGHT="$HEIGHT" \
-FPS="$FPS" \
-CRF="$CRF" \
-PRESET="$FFMPEG_PRESET" \
-APPLY_KDEN="$APPLY_KDEN" \
-FILL_MANDALA="$FILL_MANDALA" \
-SKIP_MIRROR="$SKIP_MIRROR" \
-KALEIDO_SIDES="$KALEIDO_SIDES" \
-SEED_QUAD="$SEED_QUAD" \
-DURATION="$VIDEO_DURATION" \
-KEEP_TMP="$KEEP_TMP" \
-  bash "$KALEIDO_GENERATE" "$JOB_DIR"
+  RAW_VIDEO_SRC="$RAW_VIDEO" \
+  WIDTH="$WIDTH" \
+  HEIGHT="$HEIGHT" \
+  FPS="$FPS" \
+  CRF="$CRF" \
+  PRESET="$FFMPEG_PRESET" \
+  APPLY_KDEN="$APPLY_KDEN" \
+  FILL_MANDALA="$FILL_MANDALA" \
+  SKIP_MIRROR="$SKIP_MIRROR" \
+  KALEIDO_SIDES="$KALEIDO_SIDES" \
+  SEED_QUAD="$SEED_QUAD" \
+  DURATION="$VIDEO_DURATION" \
+  KEEP_TMP="$KEEP_TMP" \
+    bash "$KALEIDO_GENERATE" "$JOB_DIR"
 
-[[ -f "$KALEIDO_OUTPUT" ]] || { echo "[ERROR] kaleido pipeline produced no output" >&2; exit 1; }
+  [[ -f "$KALEIDO_OUTPUT" ]] || { echo "[ERROR] kaleido pipeline produced no output" >&2; exit 1; }
+else
+  say "3/4  Skipping kaleido (--apply-kden not set)"
+  KALEIDO_OUTPUT="$RAW_VIDEO"
+fi
 
 # ── Step 4: Mux original audio into final output ─────────────────────────────
 say "4/4  Muxing audio..."
