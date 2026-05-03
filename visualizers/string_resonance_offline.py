@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # string_resonance_offline.py — Guitar-string physics visualizer for Abstrakt pipeline.
 #
-# Six strings at random angles vibrate via the discrete 1D wave equation.
-# Bass onsets apply gaussian velocity impulses; sparks emit from high-velocity
-# anti-nodes; frame-feedback trails produce glow. No internal kaleidoscope —
-# the kaleido stage provides symmetry.
+# Strings vibrate via the discrete 1D wave equation. Bass onsets apply gaussian
+# velocity impulses; sparks emit from high-velocity anti-nodes; frame-feedback
+# trails produce glow. Strings spawn on energy peaks and fade during quiet
+# sections. All absolute-pixel constants scale with HEIGHT / 720 so 4K renders
+# look proportionally identical to 720p.
 
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ import subprocess
 import sys
 import time
 import wave
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pygame
@@ -35,17 +36,34 @@ SR                = 44100
 SAMPLES_PER_FRAME = int(round(SR / FPS))
 N_FFT             = 2048
 
+# ── Resolution scale — all absolute-pixel physics constants multiply by this ───
+REFERENCE_HEIGHT = 720
+RES_SCALE = HEIGHT / REFERENCE_HEIGHT
+
 # ── String params ──────────────────────────────────────────────────────────────
-N_STRINGS           = int(os.environ.get("STRINGS_N_STRINGS",   6))
 N_POINTS_PER_STRING = 80
-TRAIL_DECAY         = float(os.environ.get("STRINGS_TRAIL_DECAY",  0.85))
-PLUCK_AMP           = float(os.environ.get("STRINGS_PLUCK_AMP",    200.0))
-DAMPING_BASE        = float(os.environ.get("STRINGS_DAMPING_BASE", 0.997))
-_SEED_ENV           = os.environ.get("STRINGS_SEED")
-_SEED               = int(_SEED_ENV) if _SEED_ENV else random.randint(0, 2**31 - 1)
+TRAIL_DECAY   = float(os.environ.get("STRINGS_TRAIL_DECAY",    0.85))
+PLUCK_AMP     = float(os.environ.get("STRINGS_PLUCK_AMP",      30.0))   # × RES_SCALE at pluck time
+DAMPING_BASE  = float(os.environ.get("STRINGS_DAMPING_BASE",   0.997))
+
+# Lifecycle
+_N_STRINGS_ENV = os.environ.get("STRINGS_N_STRINGS")   # back-compat
+MIN_STRINGS    = int(os.environ.get("STRINGS_MIN", 2))
+MAX_STRINGS    = int(os.environ.get("STRINGS_MAX", 12))
+SPAWN_ENERGY_THRESHOLD = float(os.environ.get("STRINGS_SPAWN_THRESHOLD", 0.07))
+if _N_STRINGS_ENV:                 # treat legacy var as both MIN and initial count
+    MIN_STRINGS = int(_N_STRINGS_ENV)
+
+SPAWN_COOLDOWN   = 0.8
+FADE_IN_DURATION = 0.5
+FADE_OUT_DURATION = 1.5
+NEGLECT_TIMEOUT  = 4.0
+
+_SEED_ENV = os.environ.get("STRINGS_SEED")
+_SEED     = int(_SEED_ENV) if _SEED_ENV else random.randint(0, 2**31 - 1)
 
 rng = random.Random(_SEED)
-print(f"[string_resonance] Seed: {_SEED}", flush=True)
+print(f"[string_resonance] Seed: {_SEED}  RES_SCALE: {RES_SCALE:.2f}", flush=True)
 
 # ── Palette ────────────────────────────────────────────────────────────────────
 def hsl_to_rgb(h: float, s: float, l: float) -> tuple[int, int, int]:
@@ -86,8 +104,14 @@ class String:
     displacement: np.ndarray
     velocity: np.ndarray
     color: tuple[int, int, int]
-    wave_speed: float   # CFL: must be < 1/dt (dt=1 → < 1)
-    damping: float      # per-step energy multiplier (< 1)
+    wave_speed: float        # CFL: must be < 1 (with dt=1)
+    damping: float           # per-step energy multiplier
+    # Lifecycle
+    life: float = 1.0        # brightness envelope 0→1→0
+    spawn_time: float = 0.0
+    fade_state: str = "stable"   # "in" | "stable" | "out"
+    last_pluck_time: float = 0.0
+    fade_start: float = 0.0
 
 
 @dataclass
@@ -102,13 +126,19 @@ class Spark:
 
 # ── String factory ─────────────────────────────────────────────────────────────
 def generate_string(idx: int) -> String:
+    # Anchor midpoint near canvas center so each string crosses the kaleido
+    # seed wedge and produces a visible mandala arm after replication.
     margin = 0.10
-    x0 = rng.uniform(WIDTH * margin, WIDTH * (1 - margin))
-    y0 = rng.uniform(HEIGHT * margin, HEIGHT * (1 - margin))
+    cx = WIDTH  * 0.5 + rng.uniform(-0.08 * WIDTH,  0.08 * WIDTH)
+    cy = HEIGHT * 0.5 + rng.uniform(-0.08 * HEIGHT, 0.08 * HEIGHT)
     angle  = rng.uniform(0, math.tau)
-    length = rng.uniform(min(WIDTH, HEIGHT) * 0.3, min(WIDTH, HEIGHT) * 0.7)
-    x1 = x0 + math.cos(angle) * length
-    y1 = y0 + math.sin(angle) * length
+    half   = rng.uniform(min(WIDTH, HEIGHT) * 0.15, min(WIDTH, HEIGHT) * 0.38)
+    x0 = cx - math.cos(angle) * half
+    y0 = cy - math.sin(angle) * half
+    x1 = cx + math.cos(angle) * half
+    y1 = cy + math.sin(angle) * half
+    x0 = max(WIDTH * margin, min(WIDTH * (1 - margin), x0))
+    y0 = max(HEIGHT * margin, min(HEIGHT * (1 - margin), y0))
     x1 = max(WIDTH * margin, min(WIDTH * (1 - margin), x1))
     y1 = max(HEIGHT * margin, min(HEIGHT * (1 - margin), y1))
     h, s_, l_ = PALETTE_HSL[idx % len(PALETTE_HSL)]
@@ -118,13 +148,10 @@ def generate_string(idx: int) -> String:
         displacement=np.zeros(N_POINTS_PER_STRING, dtype=np.float32),
         velocity=np.zeros(N_POINTS_PER_STRING, dtype=np.float32),
         color=rgb,
-        wave_speed=0.35 + (idx / N_STRINGS) * 0.4,   # 0.35 … 0.75
-        damping=DAMPING_BASE - (idx / N_STRINGS) * 0.004,  # 0.997 … 0.993
+        wave_speed=rng.uniform(0.35, 0.75),
+        damping=rng.uniform(0.993, 0.997),
     )
 
-
-strings: list[String] = [generate_string(i) for i in range(N_STRINGS)]
-sparks:  list[Spark]  = []
 
 # ── Wave equation step (discrete 1D, clamped boundaries) ──────────────────────
 def step_string(s: String, dt: float = 1.0) -> None:
@@ -138,11 +165,11 @@ def step_string(s: String, dt: float = 1.0) -> None:
     s.velocity[0]     = s.velocity[-1]     = 0.0
 
 
-# ── Plucking ───────────────────────────────────────────────────────────────────
+# ── Plucking — amplitude scales with RES_SCALE so 4K is as dramatic as 720p ───
 def pluck_string(s: String, energy: float) -> None:
     pluck_pos   = rng.randint(N_POINTS_PER_STRING // 4, 3 * N_POINTS_PER_STRING // 4)
     pluck_width = N_POINTS_PER_STRING // 8
-    pluck_amp   = energy * PLUCK_AMP
+    pluck_amp   = energy * PLUCK_AMP * RES_SCALE
     indices     = np.arange(N_POINTS_PER_STRING, dtype=np.float32)
     bump = pluck_amp * np.exp(-((indices - pluck_pos) ** 2) / (2 * pluck_width ** 2))
     if rng.random() < 0.5:
@@ -158,7 +185,7 @@ def string_point(s: String, i: int) -> tuple[float, float]:
     if length < 1e-6:
         return s.x0, s.y0
     ux, uy = dx / length, dy / length
-    px, py = -uy, ux                         # perpendicular unit vector
+    px, py = -uy, ux                     # perpendicular unit vector
     t = i / (N_POINTS_PER_STRING - 1)
     rx = s.x0 + dx * t
     ry = s.y0 + dy * t
@@ -166,20 +193,23 @@ def string_point(s: String, i: int) -> tuple[float, float]:
     return rx + px * d, ry + py * d
 
 
-# ── Render one string with layered glow ───────────────────────────────────────
+# ── Render one string — life multiplies brightness for fade-in/out ────────────
 def render_string(surface: pygame.Surface, s: String) -> None:
-    pts = [string_point(s, i) for i in range(N_POINTS_PER_STRING)]
+    pts  = [string_point(s, i) for i in range(N_POINTS_PER_STRING)]
     ipts = [(int(x), int(y)) for x, y in pts]
     if len(ipts) < 2:
         return
-    halo  = tuple(max(0, c // 5) for c in s.color)
-    glow  = tuple(max(0, c // 2) for c in s.color)
-    pygame.draw.lines(surface, halo, False, ipts, 4)
-    pygame.draw.lines(surface, glow, False, ipts, 2)
-    pygame.draw.aalines(surface, s.color, False, pts)
+    faded = tuple(int(c * s.life) for c in s.color)
+    halo  = tuple(max(0, c // 5) for c in faded)
+    glow  = tuple(max(0, c // 2) for c in faded)
+    thick_outer = max(2, int(4 * RES_SCALE))
+    thick_inner = max(1, int(2 * RES_SCALE))
+    pygame.draw.lines(surface, halo, False, ipts, thick_outer)
+    pygame.draw.lines(surface, glow, False, ipts, thick_inner)
+    pygame.draw.aalines(surface, faded, False, pts)
 
 
-# ── Spark emission from high-velocity anti-nodes ──────────────────────────────
+# ── Spark emission from high-velocity anti-nodes — velocities scale with res ──
 def emit_sparks_from_string(s: String, n: int) -> None:
     abs_vel = np.abs(s.velocity)
     if abs_vel.max() < 1e-6:
@@ -190,8 +220,8 @@ def emit_sparks_from_string(s: String, n: int) -> None:
         x, y = string_point(s, int(i))
         sparks.append(Spark(
             x=x, y=y,
-            vx=rng.uniform(-3.0, 3.0),
-            vy=rng.uniform(-3.0, 3.0),
+            vx=rng.uniform(-3.0, 3.0) * RES_SCALE,
+            vy=rng.uniform(-3.0, 3.0) * RES_SCALE,
             color=s.color,
             life=1.0,
         ))
@@ -246,6 +276,19 @@ def _read_samples(n: int):
 _fft_buf = np.zeros(N_FFT, dtype=np.float32)
 _an      = Analyzer(N_FFT)
 
+# ── Initial string pool ────────────────────────────────────────────────────────
+sparks:  list[Spark]  = []
+strings: list[String] = []
+initial_count = max(MIN_STRINGS, min(4, MAX_STRINGS))
+for _i in range(initial_count):
+    _s = generate_string(_i)
+    _s.life            = 1.0
+    _s.fade_state      = "stable"
+    _s.last_pluck_time = 0.0
+    strings.append(_s)
+print(f"[string_resonance] Starting with {len(strings)} strings "
+      f"(min={MIN_STRINGS} max={MAX_STRINGS})", flush=True)
+
 # ── pygame surfaces ────────────────────────────────────────────────────────────
 pygame.init()
 screen        = pygame.Surface((WIDTH, HEIGHT))
@@ -272,59 +315,105 @@ _proc = subprocess.Popen(
 )
 
 # ── Main render loop ───────────────────────────────────────────────────────────
-frame_idx    = 0
-render_start = time.time()
-window_start = render_start
-window_frames = 0
+frame_idx      = 0
+render_start   = time.time()
+window_start   = render_start
+window_frames  = 0
+last_spawn_time  = -10.0
+last_any_pluck   = -10.0
 
 while True:
     sam = _read_samples(SAMPLES_PER_FRAME)
     if sam is None:
         break
 
-    # FFT
     _fft_buf = np.roll(_fft_buf, -len(sam))
     _fft_buf[-len(sam):] = sam
     feat = _an.update(np.abs(np.fft.rfft(_fft_buf)))
 
-    # Physics
+    t_now = frame_idx / FPS
+
+    # ── String lifecycle ───────────────────────────────────────────────────────
+    # Spawn on energy peaks
+    if (feat["energy"] > SPAWN_ENERGY_THRESHOLD and
+            t_now - last_spawn_time > SPAWN_COOLDOWN and
+            len(strings) < MAX_STRINGS):
+        ns = generate_string(len(strings))
+        ns.life            = 0.0
+        ns.fade_state      = "in"
+        ns.spawn_time      = t_now
+        ns.last_pluck_time = t_now
+        strings.append(ns)
+        last_spawn_time = t_now
+        pluck_string(ns, feat["low"] * 1.2)   # arrive already ringing
+
+    # Advance fade envelopes — track active (non-fading) count so we don't send
+    # all strings out simultaneously when the check fires for the first time.
+    active_count = sum(1 for ss in strings if ss.fade_state != "out")
+    for s in strings:
+        age = t_now - s.spawn_time
+        if s.fade_state == "in":
+            s.life = min(1.0, age / FADE_IN_DURATION)
+            if s.life >= 1.0:
+                s.fade_state = "stable"
+        elif s.fade_state == "stable":
+            if (t_now - s.last_pluck_time > NEGLECT_TIMEOUT and
+                    active_count > MIN_STRINGS):
+                s.fade_state = "out"
+                s.fade_start = t_now
+                active_count -= 1   # book-keep so loop respects MIN_STRINGS
+        elif s.fade_state == "out":
+            s.life = max(0.0, 1.0 - (t_now - s.fade_start) / FADE_OUT_DURATION)
+
+    # Purge fully faded strings
+    strings[:] = [s for s in strings if not (s.fade_state == "out" and s.life <= 0)]
+
+    # ── Physics step ──────────────────────────────────────────────────────────
     for s in strings:
         step_string(s)
 
-    # Bass-onset pluck
-    if feat["onset"] and feat["low"] > 0.05:
-        n_plucked = rng.randint(1, 3)
-        plucked   = rng.sample(range(N_STRINGS), min(n_plucked, N_STRINGS))
+    # ── Primary pluck — bass onset ─────────────────────────────────────────────
+    if feat["onset"] and feat["low"] > 0.04 and strings:
+        n_plucked = rng.randint(1, min(3, len(strings)))
+        plucked   = rng.sample(range(len(strings)), n_plucked)
         for idx in plucked:
             pluck_string(strings[idx], feat["low"])
+            strings[idx].last_pluck_time = t_now
             emit_sparks_from_string(strings[idx], rng.randint(3, 5))
+        last_any_pluck = t_now
 
-    # Spark physics
+    # ── Secondary pluck — mid-band sustain, keeps motion alive in quiet passages
+    if t_now - last_any_pluck > 0.6 and feat["mid"] > 0.03 and strings:
+        idx = rng.randint(0, len(strings) - 1)
+        pluck_string(strings[idx], feat["mid"] * 0.5)
+        strings[idx].last_pluck_time = t_now
+        last_any_pluck = t_now
+
+    # ── Spark physics — gravity and velocity scale with resolution ─────────────
     for sp in sparks:
         sp.x  += sp.vx
         sp.y  += sp.vy
-        sp.vy += 0.1    # gravity
-        sp.life -= 0.04  # ~25 frame lifetime
+        sp.vy += 0.1 * RES_SCALE
+        sp.life -= 0.04
     sparks[:] = [sp for sp in sparks if sp.life > 0]
 
     # ── Draw ──────────────────────────────────────────────────────────────────
     screen.fill((0, 0, 0))
-    screen.blit(trail_surface, (0, 0))   # fade in previous frame at TRAIL_DECAY alpha
+    screen.blit(trail_surface, (0, 0))
 
     for s in strings:
         render_string(screen, s)
 
     for sp in sparks:
         col    = tuple(int(c * sp.life) for c in sp.color)
-        radius = max(1, int(sp.life * 3))
+        radius = max(1, int(sp.life * 3 * RES_SCALE))
         pygame.draw.circle(screen, col, (int(sp.x), int(sp.y)), radius)
 
-    # Capture this frame into trail for next iteration (opaque copy)
+    # Capture into trail
     trail_surface.set_alpha(255)
     trail_surface.blit(screen, (0, 0))
     trail_surface.set_alpha(int(255 * TRAIL_DECAY))
 
-    # Write to ffmpeg
     _proc.stdin.write(pygame.image.tostring(screen, "RGB"))
 
     frame_idx     += 1
@@ -335,6 +424,7 @@ while True:
         print(
             f"[string_resonance] frame {frame_idx}"
             f"  fps={fps_r:.1f}"
+            f"  strings={len(strings)}"
             f"  E={feat['energy']:.3f} L={feat['low']:.3f} H={feat['high']:.3f}"
             f"  sparks={len(sparks)}",
             flush=True,
