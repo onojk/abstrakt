@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # stick_figure_dance_offline.py — Procedurally-rigged dancing stick figure for Abstrakt pipeline.
 #
-# Hierarchical skeleton (15 joints) with forward kinematics. Joint angles driven
-# by layered sine waves whose amplitudes are modulated by audio bands. Bass
-# drives knee bends, mids drive arm swings, highs drive head bob. Random
-# position and size per render; kaleido stage mirrors into a mandala of dancers.
+# Hierarchical 15-joint skeleton with forward kinematics. Pose library spans
+# Hillgrove's 1864 Victorian ballroom manual and Davis's 1923 early jazz-age
+# manual. Audio energy selects the move category; moves are 4-beat keyframe
+# sequences with ease-out cubic interpolation between beats (Davis p.28:
+# "Take your steps in a gliding manner"). Kaleido stage mirrors into a
+# mandala of dancers.
 
 from __future__ import annotations
 
@@ -36,7 +38,8 @@ SAMPLES_PER_FRAME = int(round(SR / FPS))
 N_FFT             = 2048
 
 # ── Dance params ───────────────────────────────────────────────────────────────
-TRAIL_DECAY   = float(os.environ.get("DANCE_TRAIL_DECAY",  0.6))
+# Davis p.28: gliding manner; Hillgrove p.59: natural gracefulness → modest blur
+TRAIL_DECAY   = float(os.environ.get("DANCE_TRAIL_DECAY",  0.5))
 _SEED_ENV     = os.environ.get("DANCE_SEED")
 _SEED         = int(_SEED_ENV) if _SEED_ENV else random.randint(0, 2**31 - 1)
 _SCALE_ENV    = os.environ.get("DANCE_FIGURE_SCALE")
@@ -52,7 +55,6 @@ def hsl_to_rgb(h: float, s: float, l: float) -> tuple[int, int, int]:
 
 
 def roll_palette() -> list[tuple[float, float, float]]:
-    """Return list of (h, s, l) tuples."""
     base_h = rng.uniform(0.0, 1.0)
     r = rng.random()
     if r < 0.25:
@@ -85,7 +87,6 @@ class Joint:
 
 
 def _make_skeleton() -> dict[str, Joint]:
-    # Defined parent-before-child so FK traversal works in dict insertion order.
     return {
         "root":       Joint("root",       None,         0,     0,                 0),
         "torso":      Joint("torso",      "root",       80,   -math.pi / 2,       0),
@@ -129,18 +130,13 @@ for _jt in SKELETON.values():
     _jt.bone_length *= _total_scale
 
 # Root at canvas center ±10% so limbs span all kaleido wedges.
-# Placing near center is essential: kaleido replicates the first 30° wedge
-# 12×; a figure off-center at >30° from the centroid falls outside the seed
-# wedge and disappears from the mandala entirely.
 root_x = WIDTH  * (0.45 + rng.random() * 0.10)
 root_y = HEIGHT * (0.45 + rng.random() * 0.10)
 
-# Visual metrics scale with figure size
 LINE_WIDTH   = max(4, int(8 * _total_scale))
 JOINT_RADIUS = max(3, int(LINE_WIDTH * 0.8))
 HEAD_RADIUS  = max(8, int(SKELETON["head"].bone_length * 1.5))
 
-# Figure color — pick brightest palette entry
 _ci          = rng.randint(0, len(PALETTE_HSL) - 1)
 _h, _s, _l  = PALETTE_HSL[_ci]
 FIGURE_COLOR = hsl_to_rgb(_h, _s,       min(0.95, _l + 0.20))
@@ -151,7 +147,6 @@ print(f"[stick_figure_dance] Root ({root_x:.0f},{root_y:.0f})  "
 
 # ── Forward kinematics ─────────────────────────────────────────────────────────
 def compute_world_positions(rx: float, ry: float) -> dict[str, tuple[float, float]]:
-    # pos maps name → (world_x, world_y, accumulated_rotation)
     acc: dict[str, tuple[float, float, float]] = {"root": (rx, ry, 0.0)}
     for name, joint in SKELETON.items():
         if joint.parent is None:
@@ -162,6 +157,528 @@ def compute_world_positions(rx: float, ry: float) -> dict[str, tuple[float, floa
         y = py + math.sin(total_angle) * joint.bone_length
         acc[name] = (x, y, total_angle)
     return {n: (v[0], v[1]) for n, v in acc.items()}
+
+
+# ── Named moves — Hillgrove 1864 + Davis 1923 ─────────────────────────────────
+# Each move = list of 4 pose dicts (one per beat of a 4-beat measure).
+# Pose values are applied to SKELETON[name].angle.
+# Cross-lateral opposition (Noverre/Hillgrove): right leg fwd → left arm fwd.
+
+MOVES: dict[str, list[dict[str, float]]] = {
+
+    # ================================================================
+    # HILLGROVE 1864 — Formal Victorian Ballroom
+    # ================================================================
+
+    # Five Positions (Hillgrove p.58, Davis p.29): heels together,
+    # slide right, third position, fourth position forward.
+    "hillgrove_five_positions": [
+        # Beat 1: First Position
+        {"torso": 0.0, "neck": 0.0, "head": 0.0,
+         "shoulder_l": 0.15, "shoulder_r": -0.15,
+         "elbow_l": 0.4,  "elbow_r": 0.4,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.0,    "hip_r": 0.0,
+         "knee_l": 0.0,   "knee_r": 0.0,
+         "foot_l": 0.0,   "foot_r": 0.0},
+        # Beat 2: Second Position (right foot slid right)
+        {"torso": -0.05, "neck": 0.0, "head": 0.0,
+         "shoulder_l": 0.2,  "shoulder_r": -0.4,
+         "elbow_l": 0.4,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.05,   "hip_r": -0.4,
+         "knee_l": -0.2,  "knee_r": -0.05,
+         "foot_l": 0.1,   "foot_r": 0.0},
+        # Beat 3: Third Position (right heel to hollow of left)
+        {"torso": 0.0, "neck": 0.0, "head": 0.0,
+         "shoulder_l": 0.25, "shoulder_r": -0.25,
+         "elbow_l": 0.4,  "elbow_r": 0.4,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.05,   "hip_r": -0.15,
+         "knee_l": -0.1,  "knee_r": -0.15,
+         "foot_l": 0.0,   "foot_r": 0.05},
+        # Beat 4: Fourth Position forward (right foot forward,
+        # opposition: left arm forward)
+        {"torso": 0.05, "neck": -0.05, "head": -0.05,
+         "shoulder_l": 0.7,  "shoulder_r": -0.3,
+         "elbow_l": 0.5,  "elbow_r": 0.4,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": -0.15,  "hip_r": 0.4,
+         "knee_l": -0.15, "knee_r": -0.1,
+         "foot_l": 0.0,   "foot_r": 0.0},
+    ],
+
+    # The Bow (Hillgrove p.51): Gentleman's salute. Left foot sideways,
+    # right drawn to first position, body bends forward, eyes down.
+    "hillgrove_bow": [
+        # Beat 1: Preparation — left foot sideways
+        {"torso": 0.05, "neck": 0.0, "head": 0.0,
+         "shoulder_l": 0.2,  "shoulder_r": -0.2,
+         "elbow_l": 0.6,  "elbow_r": 0.6,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.3,    "hip_r": -0.05,
+         "knee_l": -0.1,  "knee_r": -0.05,
+         "foot_l": 0.0,   "foot_r": 0.0},
+        # Beat 2: Right drawn to first position
+        {"torso": 0.1, "neck": 0.1, "head": 0.1,
+         "shoulder_l": 0.3,  "shoulder_r": -0.3,
+         "elbow_l": 0.8,  "elbow_r": 0.8,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.05,   "hip_r": -0.05,
+         "knee_l": -0.05, "knee_r": -0.05,
+         "foot_l": 0.0,   "foot_r": 0.0},
+        # Beat 3: The bow — body bends forward, knees stretched, eyes down
+        {"torso": 0.55, "neck": 0.5, "head": 0.5,
+         "shoulder_l": 0.4,  "shoulder_r": -0.4,
+         "elbow_l": 1.0,  "elbow_r": 1.0,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.05,   "hip_r": -0.05,
+         "knee_l": 0.0,   "knee_r": 0.0,
+         "foot_l": 0.0,   "foot_r": 0.0},
+        # Beat 4: Recovery — body raised, eyes forward
+        {"torso": 0.0, "neck": 0.0, "head": 0.0,
+         "shoulder_l": 0.2,  "shoulder_r": -0.2,
+         "elbow_l": 0.5,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.05,   "hip_r": -0.05,
+         "knee_l": 0.0,   "knee_r": 0.0,
+         "foot_l": 0.0,   "foot_r": 0.0},
+    ],
+
+    # The Courtesy (Hillgrove p.53): Lady's salute. Right foot sideways,
+    # weight transfers left → right → left, both knees bend (the sink).
+    "hillgrove_courtesy": [
+        # Beat 1: Right foot slides sideways
+        {"torso": 0.05, "neck": 0.05, "head": 0.05,
+         "shoulder_l": 0.4,  "shoulder_r": -0.4,
+         "elbow_l": 0.6,  "elbow_r": 0.6,
+         "hand_l": 0.3,   "hand_r": -0.3,
+         "hip_l": 0.05,   "hip_r": -0.4,
+         "knee_l": -0.1,  "knee_r": -0.05,
+         "foot_l": 0.0,   "foot_r": 0.0},
+        # Beat 2: Weight on right, left to fourth rear, toes resting
+        {"torso": 0.05, "neck": 0.1, "head": 0.1,
+         "shoulder_l": 0.4,  "shoulder_r": -0.4,
+         "elbow_l": 0.6,  "elbow_r": 0.6,
+         "hand_l": 0.3,   "hand_r": -0.3,
+         "hip_l": -0.4,   "hip_r": -0.05,
+         "knee_l": -0.2,  "knee_r": -0.1,
+         "foot_l": 0.3,   "foot_r": 0.0},
+        # Beat 3: The sink — both knees deeply bent
+        {"torso": 0.15, "neck": 0.2, "head": 0.2,
+         "shoulder_l": 0.4,  "shoulder_r": -0.4,
+         "elbow_l": 0.6,  "elbow_r": 0.6,
+         "hand_l": 0.3,   "hand_r": -0.3,
+         "hip_l": -0.2,   "hip_r": 0.05,
+         "knee_l": -0.7,  "knee_r": -0.5,
+         "foot_l": 0.5,   "foot_r": 0.0},
+        # Beat 4: Return — first position
+        {"torso": 0.0, "neck": 0.0, "head": 0.0,
+         "shoulder_l": 0.3,  "shoulder_r": -0.3,
+         "elbow_l": 0.5,  "elbow_r": 0.5,
+         "hand_l": 0.2,   "hand_r": -0.2,
+         "hip_l": 0.0,    "hip_r": 0.0,
+         "knee_l": -0.05, "knee_r": -0.05,
+         "foot_l": 0.0,   "foot_r": 0.0},
+    ],
+
+    # The Passing Bow (Hillgrove p.56): Salute while in motion.
+    # Left stepping forward, body turns toward person, head inclines.
+    "hillgrove_passing_bow": [
+        # Beat 1: Approach with left stepping forward
+        {"torso": -0.1, "neck": -0.1, "head": -0.1,
+         "shoulder_l": 0.3,  "shoulder_r": -0.4,
+         "elbow_l": 0.5,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.4,    "hip_r": -0.1,
+         "knee_l": -0.15, "knee_r": -0.15,
+         "foot_l": 0.05,  "foot_r": 0.0},
+        # Beat 2: Body turns toward (left), head inclines
+        {"torso": -0.2, "neck": -0.15, "head": -0.3,
+         "shoulder_l": 0.3,  "shoulder_r": -0.5,
+         "elbow_l": 0.6,  "elbow_r": 0.7,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.3,    "hip_r": -0.05,
+         "knee_l": -0.1,  "knee_r": -0.25,
+         "foot_l": -0.05, "foot_r": 0.05},
+        # Beat 3: Hold bow
+        {"torso": -0.2, "neck": -0.15, "head": -0.3,
+         "shoulder_l": 0.3,  "shoulder_r": -0.5,
+         "elbow_l": 0.6,  "elbow_r": 0.7,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.3,    "hip_r": -0.05,
+         "knee_l": -0.1,  "knee_r": -0.25,
+         "foot_l": -0.05, "foot_r": 0.05},
+        # Beat 4: Continue past, recovering posture
+        {"torso": 0.0, "neck": 0.0, "head": 0.0,
+         "shoulder_l": 0.4,  "shoulder_r": -0.4,
+         "elbow_l": 0.5,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.2,    "hip_r": -0.2,
+         "knee_l": -0.1,  "knee_r": -0.1,
+         "foot_l": 0.0,   "foot_r": 0.0},
+    ],
+
+    # Battement (Hillgrove p.59): One foot raised, supported on other.
+    "hillgrove_battement": [
+        # Beat 1: First position
+        {"torso": 0.0, "neck": 0.0, "head": 0.0,
+         "shoulder_l": 0.2,  "shoulder_r": -0.2,
+         "elbow_l": 0.4,  "elbow_r": 0.4,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.0,    "hip_r": 0.0,
+         "knee_l": 0.0,   "knee_r": 0.0,
+         "foot_l": 0.0,   "foot_r": 0.0},
+        # Beat 2: Left foot raised, right arm forward (opposition)
+        {"torso": -0.1, "neck": 0.05, "head": 0.05,
+         "shoulder_l": -0.2, "shoulder_r": 0.7,
+         "elbow_l": 0.5,  "elbow_r": 0.4,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.6,    "hip_r": -0.1,
+         "knee_l": -0.2,  "knee_r": -0.05,
+         "foot_l": -0.2,  "foot_r": 0.0},
+        # Beat 3: Hold raised position
+        {"torso": -0.1, "neck": 0.05, "head": 0.05,
+         "shoulder_l": -0.2, "shoulder_r": 0.7,
+         "elbow_l": 0.5,  "elbow_r": 0.4,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.6,    "hip_r": -0.1,
+         "knee_l": -0.2,  "knee_r": -0.05,
+         "foot_l": -0.2,  "foot_r": 0.0},
+        # Beat 4: Lower back to first
+        {"torso": 0.0, "neck": 0.0, "head": 0.0,
+         "shoulder_l": 0.2,  "shoulder_r": -0.2,
+         "elbow_l": 0.4,  "elbow_r": 0.4,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.0,    "hip_r": 0.0,
+         "knee_l": 0.0,   "knee_r": 0.0,
+         "foot_l": 0.0,   "foot_r": 0.0},
+    ],
+
+    # ================================================================
+    # DAVIS 1923 — Early Jazz Age Modern Dances
+    # ================================================================
+
+    # The Two-Step (Davis p.30): Foundation of modern dances.
+    # Slide left to second; bring right to third; slide left to fourth.
+    "davis_two_step": [
+        {"torso": 0.0, "neck": 0.05, "head": 0.05,
+         "shoulder_l": 0.5,  "shoulder_r": -0.3,
+         "elbow_l": 0.4,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.4,    "hip_r": -0.05,
+         "knee_l": -0.05, "knee_r": -0.1,
+         "foot_l": 0.0,   "foot_r": 0.0},
+        {"torso": 0.0, "neck": 0.0, "head": 0.0,
+         "shoulder_l": 0.3,  "shoulder_r": -0.3,
+         "elbow_l": 0.4,  "elbow_r": 0.4,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.15,   "hip_r": -0.05,
+         "knee_l": -0.1,  "knee_r": -0.1,
+         "foot_l": 0.0,   "foot_r": 0.0},
+        {"torso": 0.05, "neck": 0.05, "head": 0.05,
+         "shoulder_l": -0.3, "shoulder_r": 0.5,
+         "elbow_l": 0.5,  "elbow_r": 0.4,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.4,    "hip_r": -0.15,
+         "knee_l": -0.1,  "knee_r": -0.15,
+         "foot_l": 0.0,   "foot_r": 0.05},
+        {"torso": 0.0, "neck": 0.0, "head": 0.0,
+         "shoulder_l": 0.2,  "shoulder_r": -0.2,
+         "elbow_l": 0.4,  "elbow_r": 0.4,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.1,    "hip_r": -0.1,
+         "knee_l": -0.1,  "knee_r": -0.1,
+         "foot_l": 0.0,   "foot_r": 0.0},
+    ],
+
+    # The Waltz Turn (Davis p.32): Slide left forward; draw right toe
+    # to left heel; half-circle on ball of left; slide right forward.
+    "davis_waltz_turn": [
+        {"torso": 0.05, "neck": 0.05, "head": 0.05,
+         "shoulder_l": -0.2, "shoulder_r": 0.5,
+         "elbow_l": 0.5,  "elbow_r": 0.4,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.45,   "hip_r": -0.15,
+         "knee_l": -0.15, "knee_r": -0.1,
+         "foot_l": 0.05,  "foot_r": 0.0},
+        {"torso": 0.1, "neck": 0.1, "head": 0.1,
+         "shoulder_l": -0.1, "shoulder_r": 0.3,
+         "elbow_l": 0.5,  "elbow_r": 0.4,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.25,   "hip_r": -0.05,
+         "knee_l": -0.15, "knee_r": -0.2,
+         "foot_l": 0.0,   "foot_r": 0.1},
+        {"torso": 0.2, "neck": 0.15, "head": 0.15,
+         "shoulder_l": 0.2,  "shoulder_r": -0.5,
+         "elbow_l": 0.4,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.1,    "hip_r": -0.25,
+         "knee_l": -0.2,  "knee_r": -0.1,
+         "foot_l": 0.0,   "foot_r": -0.1},
+        {"torso": 0.05, "neck": -0.05, "head": -0.05,
+         "shoulder_l": 0.5,  "shoulder_r": -0.2,
+         "elbow_l": 0.4,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": -0.15,  "hip_r": 0.45,
+         "knee_l": -0.1,  "knee_r": -0.15,
+         "foot_l": 0.0,   "foot_r": 0.05},
+    ],
+
+    # The Hesitation Waltz (Davis p.34): Forward, forward, hesitate,
+    # hesitate. The held balance is the visual point.
+    "davis_hesitation_waltz": [
+        {"torso": 0.05, "neck": -0.05, "head": -0.05,
+         "shoulder_l": 0.5,  "shoulder_r": -0.3,
+         "elbow_l": 0.5,  "elbow_r": 0.4,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": -0.15,  "hip_r": 0.4,
+         "knee_l": -0.1,  "knee_r": -0.15,
+         "foot_l": 0.0,   "foot_r": 0.05},
+        {"torso": -0.05, "neck": 0.05, "head": 0.05,
+         "shoulder_l": -0.3, "shoulder_r": 0.5,
+         "elbow_l": 0.4,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.4,    "hip_r": -0.15,
+         "knee_l": -0.15, "knee_r": -0.1,
+         "foot_l": 0.05,  "foot_r": 0.0},
+        # The hesitation — left foot raised slightly, held balance
+        {"torso": 0.0, "neck": 0.0, "head": 0.0,
+         "shoulder_l": 0.4,  "shoulder_r": -0.4,
+         "elbow_l": 0.5,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.3,    "hip_r": -0.05,
+         "knee_l": -0.4,  "knee_r": -0.05,
+         "foot_l": 0.2,   "foot_r": 0.0},
+        # Continue holding
+        {"torso": 0.0, "neck": 0.0, "head": 0.0,
+         "shoulder_l": 0.4,  "shoulder_r": -0.4,
+         "elbow_l": 0.5,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.3,    "hip_r": -0.05,
+         "knee_l": -0.4,  "knee_r": -0.05,
+         "foot_l": 0.2,   "foot_r": 0.0},
+    ],
+
+    # The Tango Cortez (Davis p.37): Back on right; weight to side on
+    # left; back to right; hold posed forward. Dramatic pause on beat 4.
+    "davis_tango_cortez": [
+        {"torso": -0.1, "neck": -0.1, "head": -0.1,
+         "shoulder_l": 0.4,  "shoulder_r": -0.5,
+         "elbow_l": 0.6,  "elbow_r": 0.7,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.1,    "hip_r": -0.5,
+         "knee_l": -0.05, "knee_r": -0.3,
+         "foot_l": 0.0,   "foot_r": 0.15},
+        {"torso": 0.0, "neck": 0.0, "head": 0.0,
+         "shoulder_l": 0.6,  "shoulder_r": -0.6,
+         "elbow_l": 0.5,  "elbow_r": 0.5,
+         "hand_l": 0.1,   "hand_r": -0.1,
+         "hip_l": 0.5,    "hip_r": -0.3,
+         "knee_l": -0.3,  "knee_r": -0.15,
+         "foot_l": 0.1,   "foot_r": 0.05},
+        {"torso": -0.05, "neck": -0.05, "head": -0.05,
+         "shoulder_l": 0.5,  "shoulder_r": -0.4,
+         "elbow_l": 0.6,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.3,    "hip_r": -0.4,
+         "knee_l": -0.1,  "knee_r": -0.25,
+         "foot_l": 0.0,   "foot_r": 0.1},
+        # The dramatic tango pause
+        {"torso": 0.1, "neck": -0.1, "head": -0.1,
+         "shoulder_l": -0.4, "shoulder_r": 0.4,
+         "elbow_l": 0.7,  "elbow_r": 0.4,
+         "hand_l": 0.1,   "hand_r": -0.1,
+         "hip_l": -0.3,   "hip_r": 0.5,
+         "knee_l": -0.15, "knee_r": -0.2,
+         "foot_l": 0.0,   "foot_r": -0.1},
+    ],
+
+    # The Lame Duck (Davis p.36): Sliding dip.
+    # Forward right with deep dip, hold, recover on left.
+    "davis_lame_duck": [
+        {"torso": 0.15, "neck": -0.1, "head": -0.1,
+         "shoulder_l": 0.5,  "shoulder_r": -0.2,
+         "elbow_l": 0.5,  "elbow_r": 0.4,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": -0.2,   "hip_r": 0.3,
+         "knee_l": -0.2,  "knee_r": -0.5,
+         "foot_l": 0.1,   "foot_r": 0.3},
+        # Deep dip position
+        {"torso": 0.2, "neck": -0.15, "head": -0.15,
+         "shoulder_l": 0.6,  "shoulder_r": -0.3,
+         "elbow_l": 0.5,  "elbow_r": 0.4,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": -0.25,  "hip_r": 0.4,
+         "knee_l": -0.25, "knee_r": -0.7,
+         "foot_l": 0.15,  "foot_r": 0.4},
+        {"torso": 0.05, "neck": -0.05, "head": -0.05,
+         "shoulder_l": 0.3,  "shoulder_r": -0.3,
+         "elbow_l": 0.4,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.1,    "hip_r": -0.05,
+         "knee_l": -0.15, "knee_r": -0.2,
+         "foot_l": 0.0,   "foot_r": 0.05},
+        {"torso": 0.0, "neck": 0.0, "head": 0.0,
+         "shoulder_l": 0.2,  "shoulder_r": -0.2,
+         "elbow_l": 0.4,  "elbow_r": 0.4,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.05,   "hip_r": -0.05,
+         "knee_l": -0.1,  "knee_r": -0.1,
+         "foot_l": 0.0,   "foot_r": 0.0},
+    ],
+
+    # The One-Step Strut (Davis p.45): Fast walk forward,
+    # "the walk has the appearance of strutting." Four confident steps.
+    "davis_one_step_strut": [
+        {"torso": 0.1, "neck": -0.05, "head": -0.05,
+         "shoulder_l": 0.6,  "shoulder_r": -0.4,
+         "elbow_l": 0.4,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": -0.2,   "hip_r": 0.5,
+         "knee_l": -0.1,  "knee_r": -0.15,
+         "foot_l": 0.0,   "foot_r": 0.05},
+        {"torso": -0.1, "neck": 0.05, "head": 0.05,
+         "shoulder_l": -0.4, "shoulder_r": 0.6,
+         "elbow_l": 0.5,  "elbow_r": 0.4,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.5,    "hip_r": -0.2,
+         "knee_l": -0.15, "knee_r": -0.1,
+         "foot_l": 0.05,  "foot_r": 0.0},
+        {"torso": 0.1, "neck": -0.05, "head": -0.05,
+         "shoulder_l": 0.6,  "shoulder_r": -0.4,
+         "elbow_l": 0.4,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": -0.2,   "hip_r": 0.5,
+         "knee_l": -0.1,  "knee_r": -0.15,
+         "foot_l": 0.0,   "foot_r": 0.05},
+        {"torso": -0.1, "neck": 0.05, "head": 0.05,
+         "shoulder_l": -0.4, "shoulder_r": 0.6,
+         "elbow_l": 0.5,  "elbow_r": 0.4,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.5,    "hip_r": -0.2,
+         "knee_l": -0.15, "knee_r": -0.1,
+         "foot_l": 0.05,  "foot_r": 0.0},
+    ],
+
+    # The Twirl (Davis p.45): Spin from left to right, right foot
+    # rigid, left propels around. Progressive torso rotation.
+    "davis_twirl": [
+        {"torso": 0.0, "neck": 0.0, "head": 0.0,
+         "shoulder_l": 0.3,  "shoulder_r": -0.3,
+         "elbow_l": 0.6,  "elbow_r": 0.6,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.1,    "hip_r": -0.1,
+         "knee_l": -0.3,  "knee_r": -0.1,
+         "foot_l": 0.1,   "foot_r": 0.0},
+        {"torso": 0.3, "neck": 0.3, "head": 0.3,
+         "shoulder_l": 0.8,  "shoulder_r": -0.8,
+         "elbow_l": 1.2,  "elbow_r": 1.2,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.15,   "hip_r": -0.05,
+         "knee_l": -0.4,  "knee_r": -0.05,
+         "foot_l": 0.2,   "foot_r": 0.0},
+        {"torso": 0.5, "neck": 0.4, "head": 0.4,
+         "shoulder_l": 1.0,  "shoulder_r": -1.0,
+         "elbow_l": 0.4,  "elbow_r": 0.4,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.2,    "hip_r": 0.0,
+         "knee_l": -0.5,  "knee_r": -0.05,
+         "foot_l": 0.25,  "foot_r": 0.0},
+        {"torso": 0.05, "neck": 0.1, "head": 0.1,
+         "shoulder_l": 0.3,  "shoulder_r": -0.3,
+         "elbow_l": 0.5,  "elbow_r": 0.5,
+         "hand_l": 0.0,   "hand_r": 0.0,
+         "hip_l": 0.05,   "hip_r": -0.05,
+         "knee_l": -0.15, "knee_r": -0.15,
+         "foot_l": 0.05,  "foot_r": 0.0},
+    ],
+}
+
+# ── Category lookup — weighted by audio energy ─────────────────────────────────
+HILLGROVE_FORMAL   = [
+    "hillgrove_five_positions",
+    "hillgrove_bow",
+    "hillgrove_courtesy",
+    "hillgrove_passing_bow",
+    "hillgrove_battement",
+]
+DAVIS_TRANSITIONAL = [
+    "davis_two_step",
+    "davis_waltz_turn",
+    "davis_hesitation_waltz",
+]
+DAVIS_DRAMATIC     = [
+    "davis_tango_cortez",
+    "davis_lame_duck",
+    "davis_one_step_strut",
+    "davis_twirl",
+]
+
+
+# ── Dance state machine ────────────────────────────────────────────────────────
+class DanceState:
+    def __init__(self, rng_: random.Random) -> None:
+        self.rng          = rng_
+        self.current_move = "hillgrove_five_positions"
+        self.move_beat    = 0
+        first             = dict(MOVES[self.current_move][0])
+        self.start_pose   = dict(first)   # pose at start of this beat's interpolation
+        self.target_pose  = dict(first)   # pose we're interpolating toward
+        self.current_pose = dict(first)   # last applied pose (snapshot for next start)
+        self.recent_moves: list[str] = []
+
+    def pick_next_move(self, energy: float) -> str:
+        # energy < 0.3 → mostly Hillgrove formal
+        # 0.3-0.6    → Davis transitional + occasional Hillgrove
+        # > 0.6      → Davis dramatic + transitional
+        if energy < 0.3:
+            pool    = HILLGROVE_FORMAL + DAVIS_TRANSITIONAL[:1]
+            weights = [3] * len(HILLGROVE_FORMAL) + [1]
+        elif energy < 0.6:
+            pool    = DAVIS_TRANSITIONAL + HILLGROVE_FORMAL[:2] + DAVIS_DRAMATIC[:1]
+            weights = [3] * len(DAVIS_TRANSITIONAL) + [2, 2, 1]
+        else:
+            pool    = DAVIS_DRAMATIC + DAVIS_TRANSITIONAL[:1]
+            weights = [3] * len(DAVIS_DRAMATIC) + [1]
+
+        # Suppress two most-recently-played moves
+        wts = list(weights)
+        for recent in self.recent_moves[-2:]:
+            if recent in pool:
+                wts[pool.index(recent)] = 0
+
+        total = sum(wts)
+        if total == 0:
+            return self.rng.choice(pool)
+        r   = self.rng.random() * total
+        cum = 0.0
+        for name, w in zip(pool, wts):
+            cum += w
+            if r < cum:
+                self.recent_moves.append(name)
+                if len(self.recent_moves) > 4:
+                    self.recent_moves.pop(0)
+                return name
+        return "hillgrove_five_positions"
+
+    def on_new_beat(self, energy: float) -> None:
+        self.start_pose = dict(self.current_pose)
+        self.move_beat += 1
+        if self.move_beat >= 4:
+            self.current_move = self.pick_next_move(energy)
+            self.move_beat    = 0
+        self.target_pose = dict(MOVES[self.current_move][self.move_beat])
+
+    def update(self, beat_phase: float) -> dict[str, float]:
+        # Ease-out cubic: Davis p.28 "gliding manner" — fast start, gentle settle
+        t      = 1.0 - (1.0 - beat_phase) ** 3
+        result = {}
+        for joint, tgt in self.target_pose.items():
+            start       = self.start_pose.get(joint, 0.0)
+            result[joint] = start * (1.0 - t) + tgt * t
+        self.current_pose = result
+        return result
 
 
 # ── Beat tracker (inter-onset-interval estimator) ──────────────────────────────
@@ -177,10 +694,10 @@ class BeatTracker:
         self.onsets.append(t)
         self.onsets = self.onsets[-16:]
         if len(self.onsets) >= 4:
-            iois = [self.onsets[i + 1] - self.onsets[i]
-                    for i in range(len(self.onsets) - 1)]
+            iois    = [self.onsets[i + 1] - self.onsets[i]
+                       for i in range(len(self.onsets) - 1)]
             ioi_med = sorted(iois)[len(iois) // 2]
-            if 0.25 < ioi_med < 1.5:           # 40–240 BPM
+            if 0.25 < ioi_med < 1.5:
                 self.bpm = 60.0 / ioi_med
         self.phase_anchor = t
 
@@ -189,7 +706,8 @@ class BeatTracker:
         return ((t - self.phase_anchor) / beat_period) % 1.0
 
 
-beat_tracker = BeatTracker()
+beat_tracker  = BeatTracker()
+dance_state   = DanceState(rng)
 
 # ── Smoothed audio band state ──────────────────────────────────────────────────
 lag_state = {"bass": 0.0, "mid": 0.0, "high": 0.0}
@@ -197,43 +715,6 @@ lag_state = {"bass": 0.0, "mid": 0.0, "high": 0.0}
 def _alag(prev: float, new: float) -> float:
     alpha = 0.4 if new > prev else 0.1
     return prev + alpha * (new - prev)
-
-
-# ── Pose update (called every frame) ──────────────────────────────────────────
-def update_dance(beat_phase: float) -> None:
-    bass = lag_state["bass"]
-    mid  = lag_state["mid"]
-    high = lag_state["high"]
-
-    # Knee bend on bass beat — left and right oppose each other to reach vertical
-    knee_bend = bass * 0.6 * (0.5 + 0.5 * math.sin(beat_phase * math.tau))
-    SKELETON["knee_l"].angle = -knee_bend   # bends left shin toward vertical
-    SKELETON["knee_r"].angle =  knee_bend   # bends right shin toward vertical
-    SKELETON["foot_l"].angle =  knee_bend * 0.5
-    SKELETON["foot_r"].angle = -knee_bend * 0.5
-
-    # Torso sways side-to-side at half-tempo
-    sway = 0.15 * math.sin(beat_phase * math.pi)
-    SKELETON["torso"].angle = sway
-
-    # Arm swings — cross-lateral, mid-driven amplitude
-    arm_amp   = 0.4 + mid * 0.8
-    arm_swing = arm_amp * math.sin(beat_phase * math.tau)
-    SKELETON["shoulder_l"].angle =  arm_swing
-    SKELETON["shoulder_r"].angle = -arm_swing
-    elbow_bend = 0.3 + bass * 0.6
-    SKELETON["elbow_l"].angle = elbow_bend
-    SKELETON["elbow_r"].angle = elbow_bend
-
-    # Head bob on highs (double-time)
-    head_bob = high * 0.2 * math.sin(beat_phase * math.tau * 2)
-    SKELETON["head"].angle = head_bob
-    SKELETON["neck"].angle = head_bob * 0.3
-
-    # Hip sway
-    hip_offset = 0.1 * math.sin(beat_phase * math.tau)
-    SKELETON["hip_l"].angle =  hip_offset
-    SKELETON["hip_r"].angle = -hip_offset
 
 
 # ── Rendering ──────────────────────────────────────────────────────────────────
@@ -244,19 +725,15 @@ def draw_figure(surface: pygame.Surface,
         bx, by = world_pos[b_name]
         pygame.draw.line(surface, FIGURE_COLOR,
                          (int(ax), int(ay)), (int(bx), int(by)), LINE_WIDTH)
-
-    # Joint dots for smooth corners (skip root which has no visible bone tip)
     for name, (x, y) in world_pos.items():
         if name in ("root", "head"):
             continue
         pygame.draw.circle(surface, JOINT_COLOR, (int(x), int(y)), JOINT_RADIUS)
-
-    # Head — filled circle at the head endpoint
     hx, hy = world_pos["head"]
     pygame.draw.circle(surface, FIGURE_COLOR, (int(hx), int(hy)), HEAD_RADIUS)
 
 
-# ── Analyzer (same shape as warpfield) ────────────────────────────────────────
+# ── Analyzer ───────────────────────────────────────────────────────────────────
 class Analyzer:
     def __init__(self, n_fft: int) -> None:
         self.prev = np.zeros(n_fft // 2 + 1, dtype=float)
@@ -312,6 +789,10 @@ trail_surface = pygame.Surface((WIDTH, HEIGHT))
 trail_surface.fill((0, 0, 0))
 trail_surface.set_alpha(int(255 * TRAIL_DECAY))
 
+# Label font for DANCE_LABEL debug overlay (pre-created to avoid per-frame init)
+_label_font = (pygame.font.SysFont("monospace", 18)
+               if os.environ.get("DANCE_LABEL") == "1" else None)
+
 # ── ffmpeg writer ──────────────────────────────────────────────────────────────
 _proc = subprocess.Popen(
     [
@@ -331,10 +812,11 @@ _proc = subprocess.Popen(
 )
 
 # ── Main render loop ───────────────────────────────────────────────────────────
-frame_idx    = 0
-render_start = time.time()
-window_start = render_start
-window_frames = 0
+frame_idx      = 0
+render_start   = time.time()
+window_start   = render_start
+window_frames  = 0
+prev_beat_phase = 0.0
 
 while True:
     sam = _read_samples(SAMPLES_PER_FRAME)
@@ -353,14 +835,35 @@ while True:
     lag_state["high"] = _alag(lag_state["high"], feat["high"])
 
     beat_phase = beat_tracker.beat_phase(t)
-    update_dance(beat_phase)
+
+    # Detect beat crossing (phase wraps back to near-0 or onset resets anchor)
+    if beat_phase < prev_beat_phase:
+        dance_state.on_new_beat(feat["energy"])
+    prev_beat_phase = beat_phase
+
+    # Apply pose to skeleton joints
+    pose = dance_state.update(beat_phase)
+    for jn, ang in pose.items():
+        if jn in SKELETON:
+            SKELETON[jn].angle = ang
+
+    # Small audio-reactive knee overlay (Davis p.27: "movement from below the hips")
+    kb = lag_state["bass"] * 0.04 * math.sin(beat_phase * math.tau)
+    SKELETON["knee_l"].angle -= kb
+    SKELETON["knee_r"].angle += kb
 
     world_pos = compute_world_positions(root_x, root_y)
 
-    # Draw — trail blit first, then figure on top
+    # Draw — trail first, figure on top
     screen.fill((0, 0, 0))
     screen.blit(trail_surface, (0, 0))
     draw_figure(screen, world_pos)
+
+    # DANCE_LABEL debug overlay
+    if _label_font is not None:
+        lbl  = f"{dance_state.current_move} [{dance_state.move_beat}]"
+        surf = _label_font.render(lbl, True, (200, 200, 200))
+        screen.blit(surf, (20, 20))
 
     # Capture into trail for next frame
     trail_surface.set_alpha(255)
@@ -378,7 +881,9 @@ while True:
             f"[stick_figure_dance] frame {frame_idx}"
             f"  fps={fps_r:.1f}"
             f"  bpm={beat_tracker.bpm:.1f}  ph={beat_phase:.2f}"
-            f"  B={lag_state['bass']:.3f} M={lag_state['mid']:.3f} H={lag_state['high']:.3f}",
+            f"  E={feat['energy']:.3f}"
+            f"  B={lag_state['bass']:.3f} M={lag_state['mid']:.3f}"
+            f"  move={dance_state.current_move}[{dance_state.move_beat}]",
             flush=True,
         )
         window_start  = now
