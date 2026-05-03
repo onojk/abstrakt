@@ -8,7 +8,8 @@
 # locomotor travel. Inverted moves (handstands, freezes) render 180° rotated.
 # Audio energy selects era/category; kaleido stage mirrors into mandala.
 # Characters: DANCE_CHARACTER=skeleton (default) — anatomical skull/ribcage/pelvis;
-#             DANCE_CHARACTER=cat — pixel-art mystical spirit-guide cat with spring tail.
+#             DANCE_CHARACTER=cat — pixel-art mystical spirit-guide cat with spring tail;
+#             DANCE_CHARACTER=clusters — 6 abstract line-cluster creatures, form dissolves.
 # DANCE_SKELETON=0 falls back to original neon stick-figure mode.
 
 from __future__ import annotations
@@ -42,10 +43,12 @@ N_FFT             = 2048
 
 # ── Dance params ───────────────────────────────────────────────────────────────
 DANCE_CHARACTER = os.environ.get("DANCE_CHARACTER", "skeleton").lower()
-if DANCE_CHARACTER not in ("skeleton", "cat"):
+if DANCE_CHARACTER not in ("skeleton", "cat", "clusters"):
     DANCE_CHARACTER = "skeleton"
 SKELETON_MODE   = os.environ.get("DANCE_SKELETON", "1") == "1"
-if DANCE_CHARACTER == "cat":
+if DANCE_CHARACTER == "clusters":
+    _default_trail = 0.92
+elif DANCE_CHARACTER == "cat":
     _default_trail = 0.85
 elif SKELETON_MODE:
     _default_trail = 0.75
@@ -1951,6 +1954,294 @@ def render_cat(surface: pygame.Surface,
     render_cat_head(surface, pos["head"], pos["neck"], scale)
 
 
+# ── Abstract cluster character rendering ──────────────────────────────────────
+
+CLUSTER_DEFINITIONS = [
+    # (name, anchor_joint, style, palette_key, audio_band)
+    ("spike_burst",   "head",   "spike",     "magenta", "bass"),
+    ("tendril_swirl", "torso",  "tendril",   "cyan",    "mid"),
+    ("lightning",     "hand_l", "lightning", "yellow",  "high"),
+    ("spiral_arms",   "hand_r", "spiral",    "lime",    "mid"),
+    ("comet_trails",  "foot_l", "comet",     "orange",  "high"),
+    ("web_crackle",   "foot_r", "web",       "violet",  "bass"),
+]
+
+CLUSTER_PALETTES: dict[str, list] = {
+    "magenta": [(255,  50, 200), (255, 100, 220), (200,  30, 150), (255, 180, 240)],
+    "cyan":    [( 50, 220, 255), (100, 240, 255), ( 30, 180, 220), (180, 250, 255)],
+    "yellow":  [(255, 240,  80), (255, 220,  30), (200, 180,  50), (255, 250, 180)],
+    "lime":    [(150, 255,  80), (100, 220,  30), (180, 250, 100), (220, 255, 180)],
+    "orange":  [(255, 140,  40), (255, 100,  20), (220, 110,  50), (255, 180, 100)],
+    "violet":  [(180,  80, 255), (140,  30, 220), (200, 100, 240), (220, 180, 255)],
+}
+
+
+class ClusterBase:
+    def __init__(self, anchor_joint: str, palette: list, audio_band: str) -> None:
+        self.anchor_joint = anchor_joint
+        self.palette      = palette
+        self.audio_band   = audio_band
+
+    def update(self, anchor_pos, audio, t, scale, rng): raise NotImplementedError
+    def render(self, surface, scale):                   raise NotImplementedError
+
+
+class SpikeBurst(ClusterBase):
+    """Sea-urchin style — straight rigid lines radiating from anchor, bass-driven."""
+    def __init__(self, anchor_joint, palette, audio_band):
+        super().__init__(anchor_joint, palette, audio_band)
+        self.n_spikes        = 16
+        self.base_radius     = 30
+        self.spike_lengths   = [1.0] * self.n_spikes
+        self.anchor          = (0.0, 0.0)
+        self.energy_response = 0.0
+
+    def update(self, anchor_pos, audio, t, scale, rng):
+        self.anchor          = anchor_pos
+        self.energy_response = self.energy_response * 0.7 + audio[self.audio_band] * 0.3
+        for i in range(self.n_spikes):
+            phase = (i / self.n_spikes) * math.tau
+            self.spike_lengths[i] = (0.7 + 0.3 * math.sin(t * 2 + phase)
+                                     + self.energy_response * 1.5)
+
+    def render(self, surface, scale):
+        ax, ay = self.anchor
+        for i in range(self.n_spikes):
+            angle  = (i / self.n_spikes) * math.tau
+            length = self.base_radius * scale * self.spike_lengths[i]
+            ex     = ax + math.cos(angle) * length
+            ey     = ay + math.sin(angle) * length
+            color  = self.palette[i % len(self.palette)]
+            pygame.draw.line(surface, color,
+                             (int(ax), int(ay)), (int(ex), int(ey)),
+                             max(2, int(3 * scale)))
+
+
+class TendrilSwirl(ClusterBase):
+    """Jellyfish tendrils — wavy curling lines sweeping slowly, mid-driven."""
+    def __init__(self, anchor_joint, palette, audio_band):
+        super().__init__(anchor_joint, palette, audio_band)
+        self.n_tendrils           = 12
+        self.tendril_phase_offsets = [i * 0.3 for i in range(12)]
+        self.anchor               = (0.0, 0.0)
+        self.t                    = 0.0
+        self.energy_response      = 0.0
+
+    def update(self, anchor_pos, audio, t, scale, rng):
+        self.anchor          = anchor_pos
+        self.t               = t
+        self.energy_response = self.energy_response * 0.85 + audio[self.audio_band] * 0.15
+
+    def render(self, surface, scale):
+        ax, ay = self.anchor
+        for i in range(self.n_tendrils):
+            base_angle = (i / self.n_tendrils) * math.tau
+            phase      = self.tendril_phase_offsets[i]
+            color      = self.palette[i % len(self.palette)]
+            prev_x, prev_y = ax, ay
+            for j in range(1, 13):
+                t_along = j / 12
+                dist    = (15 + 35 * t_along) * scale * (1.0 + self.energy_response)
+                curl    = math.sin(self.t * 1.5 + phase + t_along * 3) * 0.6
+                a       = base_angle + curl
+                px      = ax + math.cos(a) * dist
+                py      = ay + math.sin(a) * dist
+                pygame.draw.line(surface, color,
+                                 (int(prev_x), int(prev_y)), (int(px), int(py)),
+                                 max(1, int(2 * scale)))
+                prev_x, prev_y = px, py
+
+
+class Lightning(ClusterBase):
+    """Sharp jagged zigzag lines, snap into existence on transients, high-driven."""
+    def __init__(self, anchor_joint, palette, audio_band):
+        super().__init__(anchor_joint, palette, audio_band)
+        self.bolts               = []
+        self.anchor              = (0.0, 0.0)
+        self.last_trigger_energy = 0.0
+
+    def update(self, anchor_pos, audio, t, scale, rng):
+        self.anchor = anchor_pos
+        cur_e       = audio[self.audio_band]
+        if (cur_e > self.last_trigger_energy * 1.3
+                and cur_e > 0.05
+                and len(self.bolts) < 8):
+            ax, ay      = self.anchor
+            angle       = rng.uniform(0, math.tau)
+            length      = 50 * scale * (0.5 + cur_e)
+            zigzag_amp  = 8 * scale
+            path        = [(ax, ay)]
+            for j in range(1, 7):
+                t_along   = j / 6
+                base_x    = ax + math.cos(angle) * length * t_along
+                base_y    = ay + math.sin(angle) * length * t_along
+                perp_x, perp_y = -math.sin(angle), math.cos(angle)
+                jitter    = rng.uniform(-zigzag_amp, zigzag_amp)
+                path.append((base_x + perp_x * jitter, base_y + perp_y * jitter))
+            self.bolts.append({"path": path, "life": 1.0,
+                                "color": rng.choice(self.palette)})
+        self.last_trigger_energy = cur_e
+        for bolt in self.bolts:
+            bolt["life"] -= 0.08
+        self.bolts = [b for b in self.bolts if b["life"] > 0]
+
+    def render(self, surface, scale):
+        for bolt in self.bolts:
+            life  = bolt["life"]
+            color = tuple(int(c * life) for c in bolt["color"])
+            path  = bolt["path"]
+            for i in range(len(path) - 1):
+                pygame.draw.line(surface, color,
+                                 (int(path[i][0]),     int(path[i][1])),
+                                 (int(path[i + 1][0]), int(path[i + 1][1])),
+                                 max(1, int(2 * scale)))
+
+
+class SpiralArms(ClusterBase):
+    """Logarithmic spirals slowly rotating, mid-driven rotation speed."""
+    def __init__(self, anchor_joint, palette, audio_band):
+        super().__init__(anchor_joint, palette, audio_band)
+        self.n_arms          = 4
+        self.rotation        = 0.0
+        self.anchor          = (0.0, 0.0)
+        self.energy_response = 0.0
+
+    def update(self, anchor_pos, audio, t, scale, rng):
+        self.anchor          = anchor_pos
+        self.energy_response = self.energy_response * 0.8 + audio[self.audio_band] * 0.2
+        self.rotation       += 0.03 + self.energy_response * 0.1
+
+    def render(self, surface, scale):
+        ax, ay = self.anchor
+        for arm_i in range(self.n_arms):
+            arm_offset     = (arm_i / self.n_arms) * math.tau + self.rotation
+            color          = self.palette[arm_i % len(self.palette)]
+            prev_x, prev_y = ax, ay
+            for j in range(1, 21):
+                t_along = j / 20
+                radius  = min(5 * scale + math.exp(t_along * 2) * 5 * scale,
+                              60 * scale * (1.0 + self.energy_response))
+                angle   = arm_offset + t_along * math.tau * 0.8
+                px      = ax + math.cos(angle) * radius
+                py      = ay + math.sin(angle) * radius
+                pygame.draw.line(surface, color,
+                                 (int(prev_x), int(prev_y)), (int(px), int(py)),
+                                 max(1, int(2 * scale)))
+                prev_x, prev_y = px, py
+
+
+class CometTrails(ClusterBase):
+    """Short bright particles moving outward with fading trail, high-driven spawn rate."""
+    def __init__(self, anchor_joint, palette, audio_band):
+        super().__init__(anchor_joint, palette, audio_band)
+        self.comets = []
+        self.anchor = (0.0, 0.0)
+
+    def update(self, anchor_pos, audio, t, scale, rng):
+        self.anchor  = anchor_pos
+        spawn_chance = 0.1 + audio[self.audio_band] * 0.5
+        if rng.random() < spawn_chance and len(self.comets) < 12:
+            angle = rng.uniform(0, math.tau)
+            speed = (3 + rng.uniform(0, 2)) * scale
+            ax, ay = self.anchor
+            self.comets.append({
+                "x": ax, "y": ay,
+                "vx": math.cos(angle) * speed,
+                "vy": math.sin(angle) * speed,
+                "trail": [(ax, ay)],
+                "life":  1.0,
+                "color": rng.choice(self.palette),
+            })
+        for c in self.comets:
+            c["x"]  += c["vx"]
+            c["y"]  += c["vy"]
+            c["trail"].append((c["x"], c["y"]))
+            if len(c["trail"]) > 8:
+                c["trail"].pop(0)
+            c["life"] -= 0.04
+        self.comets = [c for c in self.comets if c["life"] > 0]
+
+    def render(self, surface, scale):
+        for c in self.comets:
+            trail = c["trail"]
+            for i in range(len(trail) - 1):
+                fade  = ((i + 1) / len(trail)) * c["life"]
+                color = tuple(int(ch * fade) for ch in c["color"])
+                pygame.draw.line(surface, color,
+                                 (int(trail[i][0]),     int(trail[i][1])),
+                                 (int(trail[i + 1][0]), int(trail[i + 1][1])),
+                                 max(1, int(2 * scale)))
+
+
+class WebCrackle(ClusterBase):
+    """Tight node web pulsing outward on bass hits."""
+    def __init__(self, anchor_joint, palette, audio_band):
+        super().__init__(anchor_joint, palette, audio_band)
+        self.n_nodes    = 14
+        self.node_radii  = [0.5 + i * 0.05 for i in range(14)]
+        self.node_angles = [(i / 14) * math.tau + 0.3 * math.sin(i * 0.7)
+                            for i in range(14)]
+        self.anchor     = (0.0, 0.0)
+        self.expansion  = 1.0
+        self.t          = 0.0
+
+    def update(self, anchor_pos, audio, t, scale, rng):
+        self.anchor    = anchor_pos
+        self.t         = t
+        target         = 1.0 + audio[self.audio_band] * 0.8
+        self.expansion = self.expansion * 0.85 + target * 0.15
+
+    def render(self, surface, scale):
+        ax, ay = self.anchor
+        nodes  = []
+        for r, a in zip(self.node_radii, self.node_angles):
+            radius = r * 25 * scale * self.expansion
+            wiggle = math.sin(self.t * 2 + a * 3) * 1.5 * scale
+            nodes.append((ax + math.cos(a) * (radius + wiggle),
+                           ay + math.sin(a) * (radius + wiggle)))
+        for i, n in enumerate(nodes):
+            color  = self.palette[i % len(self.palette)]
+            n_next = nodes[(i + 1) % self.n_nodes]
+            pygame.draw.line(surface, color,
+                             (int(ax), int(ay)), (int(n[0]), int(n[1])),
+                             max(1, int(1 * scale)))
+            pygame.draw.line(surface, color,
+                             (int(n[0]), int(n[1])), (int(n_next[0]), int(n_next[1])),
+                             max(1, int(1 * scale)))
+
+
+def make_clusters() -> list:
+    result = []
+    for _name, anchor, style, palette_key, band in CLUSTER_DEFINITIONS:
+        palette = CLUSTER_PALETTES[palette_key]
+        cls_map = {"spike": SpikeBurst, "tendril": TendrilSwirl,
+                   "lightning": Lightning, "spiral": SpiralArms,
+                   "comet": CometTrails, "web": WebCrackle}
+        if style in cls_map:
+            result.append((_name, cls_map[style](anchor, palette, band)))
+    return result
+
+
+def render_clusters(surface: pygame.Surface,
+                    positions: dict,
+                    lag_bands: dict,
+                    t: float,
+                    scale: float,
+                    rng: random.Random,
+                    all_clusters: list) -> None:
+    """Render all cluster creatures. lag_bands values are raw FFT-level; scaled here."""
+    bands = {
+        "bass": min(1.0, lag_bands["bass"] * 6.0),
+        "mid":  min(1.0, lag_bands["mid"]  * 10.0),
+        "high": min(1.0, lag_bands["high"] * 20.0),
+    }
+    fallback = positions.get("torso", (WIDTH // 2, HEIGHT // 2))
+    for _name, cluster in all_clusters:
+        anchor_pos = positions.get(cluster.anchor_joint, fallback)
+        cluster.update(anchor_pos, bands, t, scale, rng)
+        cluster.render(surface, scale)
+
+
 # ── Analyzer ───────────────────────────────────────────────────────────────────
 class Analyzer:
     def __init__(self, n_fft: int) -> None:
@@ -2000,7 +2291,8 @@ def _read_samples(n: int):
 _fft_buf = np.zeros(N_FFT, dtype=np.float32)
 _an      = Analyzer(N_FFT)
 
-cat_tail = CatTail() if DANCE_CHARACTER == "cat" else None
+cat_tail    = CatTail()      if DANCE_CHARACTER == "cat"      else None
+all_clusters = make_clusters() if DANCE_CHARACTER == "clusters" else []
 sparkles: list = []
 
 # ── pygame surfaces ────────────────────────────────────────────────────────────
@@ -2114,7 +2406,9 @@ while True:
     # Draw — trail first, figure on top
     screen.fill((0, 0, 0))
     screen.blit(trail_surface, (0, 0))
-    if DANCE_CHARACTER == "cat":
+    if DANCE_CHARACTER == "clusters":
+        render_clusters(screen, world_pos, lag_state, t_sec, _total_scale, rng, all_clusters)
+    elif DANCE_CHARACTER == "cat":
         cat_tail.update(SKELETON["torso"].angle)
         render_cat(screen, world_pos, _total_scale, cat_tail)
         update_and_render_sparkles(screen)
