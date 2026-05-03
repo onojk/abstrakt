@@ -2,11 +2,11 @@
 # stick_figure_dance_offline.py — Procedurally-rigged dancing stick figure for Abstrakt pipeline.
 #
 # Hierarchical 15-joint skeleton with forward kinematics. Pose library spans
-# Hillgrove's 1864 Victorian ballroom manual and Davis's 1923 early jazz-age
-# manual. BASTE framework: per-move easing curves (Body/Energy), root-y level
-# modulation (Space), and locomotor moves that travel across the canvas
-# (Action). Audio energy selects move category; kaleido stage mirrors into a
-# mandala of dancers.
+# ~130 years of dance: Hillgrove's 1864 Victorian ballroom manual, Davis's
+# 1923 jazz-age manual, and Etcheto's Encyclopedia of Breakdancing (B-boying
+# 1970s-90s). BASTE framework: per-move easing, root-y level modulation, and
+# locomotor travel. Inverted moves (handstands, freezes) render 180° rotated.
+# Audio energy selects era/category; kaleido stage mirrors into mandala.
 
 from __future__ import annotations
 
@@ -650,6 +650,387 @@ MOVES: dict[str, list[dict[str, float]]] = {
          "knee_l": -0.15, "knee_r": -0.15,
          "foot_l": 0.0,   "foot_r": 0.0},
     ],
+
+    # ================================================================
+    # B-BOY / B-BOYING 1970s-90s — Etcheto Encyclopedia of Breakdancing
+    # ================================================================
+
+    # ---------- TOPROCK / UPROCK (standing) ----------
+    "bboy_indian_step": [
+        {"torso": 0.1,  "neck": -0.05, "head": -0.05,
+         "shoulder_l": -0.6, "shoulder_r": 0.4,
+         "elbow_l": 1.4,    "elbow_r": 0.8,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": -0.15,    "hip_r": 0.5,
+         "knee_l": -0.25,   "knee_r": -0.2,
+         "foot_l": 0.0,     "foot_r": 0.05},
+        {"torso": 0.0,  "neck": 0.0,   "head": 0.0,
+         "shoulder_l": -0.3, "shoulder_r": 0.3,
+         "elbow_l": 1.0,    "elbow_r": 1.0,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.0,      "hip_r": 0.0,
+         "knee_l": -0.3,    "knee_r": -0.3,
+         "foot_l": 0.0,     "foot_r": 0.0},
+        {"torso": -0.1, "neck": 0.05,  "head": 0.05,
+         "shoulder_l": 0.4,  "shoulder_r": -0.6,
+         "elbow_l": 0.8,    "elbow_r": 1.4,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.5,      "hip_r": -0.15,
+         "knee_l": -0.2,    "knee_r": -0.25,
+         "foot_l": 0.05,    "foot_r": 0.0},
+        {"torso": 0.0,  "neck": 0.0,   "head": 0.0,
+         "shoulder_l": 0.3,  "shoulder_r": -0.3,
+         "elbow_l": 1.0,    "elbow_r": 1.0,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.0,      "hip_r": 0.0,
+         "knee_l": -0.3,    "knee_r": -0.3,
+         "foot_l": 0.0,     "foot_r": 0.0},
+    ],
+
+    "bboy_karaoke_walk": [
+        {"torso": 0.15,  "neck": -0.1,  "head": -0.1,
+         "shoulder_l": 0.7,  "shoulder_r": -0.5,
+         "elbow_l": 0.7,    "elbow_r": 0.9,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": -0.25,    "hip_r": 0.45,
+         "knee_l": -0.2,    "knee_r": -0.15,
+         "foot_l": 0.0,     "foot_r": 0.05},
+        {"torso": 0.05,  "neck": 0.0,   "head": 0.0,
+         "shoulder_l": 0.4,  "shoulder_r": -0.7,
+         "elbow_l": 1.1,    "elbow_r": 0.6,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.3,      "hip_r": -0.15,
+         "knee_l": -0.3,    "knee_r": -0.1,
+         "foot_l": 0.05,    "foot_r": 0.0},
+        {"torso": -0.15, "neck": 0.1,   "head": 0.1,
+         "shoulder_l": -0.5, "shoulder_r": 0.7,
+         "elbow_l": 0.9,    "elbow_r": 0.7,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.45,     "hip_r": -0.25,
+         "knee_l": -0.15,   "knee_r": -0.2,
+         "foot_l": 0.05,    "foot_r": 0.0},
+        {"torso": -0.05, "neck": 0.0,   "head": 0.0,
+         "shoulder_l": -0.7, "shoulder_r": 0.4,
+         "elbow_l": 0.6,    "elbow_r": 1.1,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": -0.15,    "hip_r": 0.3,
+         "knee_l": -0.1,    "knee_r": -0.3,
+         "foot_l": 0.0,     "foot_r": 0.05},
+    ],
+
+    # ---------- DROPS / TRANSITIONS ----------
+    "bboy_cork_screw": [
+        {"torso": 0.15,  "neck": -0.1,  "head": -0.1,
+         "shoulder_l": 0.6,  "shoulder_r": -0.6,
+         "elbow_l": 0.7,    "elbow_r": 0.7,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.05,     "hip_r": -0.05,
+         "knee_l": -0.4,    "knee_r": -0.4,
+         "foot_l": 0.2,     "foot_r": 0.2},
+        {"torso": 0.4,   "neck": -0.3,  "head": -0.3,
+         "shoulder_l": 0.0,  "shoulder_r": -0.9,
+         "elbow_l": 0.5,    "elbow_r": 0.4,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.1,      "hip_r": -0.1,
+         "knee_l": -0.9,    "knee_r": -0.9,
+         "foot_l": 0.5,     "foot_r": 0.5},
+        {"torso": 0.6,   "neck": -0.5,  "head": -0.5,
+         "shoulder_l": -0.9, "shoulder_r": 0.6,
+         "elbow_l": 0.2,    "elbow_r": 0.4,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.2,      "hip_r": -0.2,
+         "knee_l": -1.3,    "knee_r": -1.3,
+         "foot_l": 0.8,     "foot_r": 0.8},
+        {"torso": 0.5,   "neck": -0.4,  "head": -0.4,
+         "shoulder_l": -1.1, "shoulder_r": 1.1,
+         "elbow_l": 0.2,    "elbow_r": 0.2,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.1,      "hip_r": -0.1,
+         "knee_l": -1.3,    "knee_r": -1.3,
+         "foot_l": 0.8,     "foot_r": 0.8},
+    ],
+
+    # ---------- FOOTWORK (floor work) ----------
+    "bboy_six_step": [
+        {"torso": 0.5,   "neck": -0.3,  "head": -0.3,
+         "shoulder_l": -0.9, "shoulder_r": 0.9,
+         "elbow_l": 0.2,    "elbow_r": 0.2,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": -0.5,     "hip_r": 0.3,
+         "knee_l": -0.1,    "knee_r": -1.2,
+         "foot_l": 0.0,     "foot_r": 0.6},
+        {"torso": 0.4,   "neck": -0.2,  "head": -0.2,
+         "shoulder_l": -1.3, "shoulder_r": 1.3,
+         "elbow_l": 0.2,    "elbow_r": 0.2,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": -0.3,     "hip_r": 0.3,
+         "knee_l": -0.4,    "knee_r": -0.4,
+         "foot_l": 0.2,     "foot_r": 0.2},
+        {"torso": 0.5,   "neck": -0.3,  "head": -0.3,
+         "shoulder_l": 0.9,  "shoulder_r": -0.9,
+         "elbow_l": 0.2,    "elbow_r": 0.2,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.3,      "hip_r": -0.5,
+         "knee_l": -1.2,    "knee_r": -0.1,
+         "foot_l": 0.6,     "foot_r": 0.0},
+        {"torso": 0.6,   "neck": -0.4,  "head": -0.4,
+         "shoulder_l": -0.7, "shoulder_r": 0.7,
+         "elbow_l": 0.1,    "elbow_r": 0.1,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.4,      "hip_r": -0.4,
+         "knee_l": -0.6,    "knee_r": -0.6,
+         "foot_l": 0.4,     "foot_r": 0.4},
+    ],
+
+    "bboy_coffee_grinder": [
+        {"torso": 0.55,  "neck": -0.3,  "head": -0.3,
+         "shoulder_l": -1.0, "shoulder_r": 1.0,
+         "elbow_l": 0.2,    "elbow_r": 0.2,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.4,      "hip_r": -0.7,
+         "knee_l": -1.3,    "knee_r": -0.05,
+         "foot_l": 0.7,     "foot_r": -0.1},
+        {"torso": 0.65,  "neck": -0.4,  "head": -0.4,
+         "shoulder_l": -0.5, "shoulder_r": 0.5,
+         "elbow_l": 0.1,    "elbow_r": 0.1,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.1,      "hip_r": -0.1,
+         "knee_l": -0.6,    "knee_r": -0.6,
+         "foot_l": 0.4,     "foot_r": 0.4},
+        {"torso": 0.55,  "neck": -0.3,  "head": -0.3,
+         "shoulder_l": -1.0, "shoulder_r": 1.0,
+         "elbow_l": 0.2,    "elbow_r": 0.2,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": -0.7,     "hip_r": 0.4,
+         "knee_l": -0.05,   "knee_r": -1.3,
+         "foot_l": -0.1,    "foot_r": 0.7},
+        {"torso": 0.65,  "neck": -0.4,  "head": -0.4,
+         "shoulder_l": -0.5, "shoulder_r": 0.5,
+         "elbow_l": 0.1,    "elbow_r": 0.1,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": -0.1,     "hip_r": 0.1,
+         "knee_l": -0.6,    "knee_r": -0.6,
+         "foot_l": 0.4,     "foot_r": 0.4},
+    ],
+
+    "bboy_spyder": [
+        {"torso": 0.65,  "neck": -0.4,  "head": -0.4,
+         "shoulder_l": -0.5, "shoulder_r": 0.5,
+         "elbow_l": 0.1,    "elbow_r": 0.1,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.3,      "hip_r": -0.05,
+         "knee_l": -0.3,    "knee_r": -0.5,
+         "foot_l": 0.2,     "foot_r": 0.3},
+        {"torso": 0.65,  "neck": -0.4,  "head": -0.4,
+         "shoulder_l": -0.5, "shoulder_r": 0.5,
+         "elbow_l": 0.1,    "elbow_r": 0.1,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.0,      "hip_r": 0.0,
+         "knee_l": -0.4,    "knee_r": -0.4,
+         "foot_l": 0.25,    "foot_r": 0.25},
+        {"torso": 0.65,  "neck": -0.4,  "head": -0.4,
+         "shoulder_l": -0.5, "shoulder_r": 0.5,
+         "elbow_l": 0.1,    "elbow_r": 0.1,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.05,     "hip_r": -0.3,
+         "knee_l": -0.5,    "knee_r": -0.3,
+         "foot_l": 0.3,     "foot_r": 0.2},
+        {"torso": 0.65,  "neck": -0.4,  "head": -0.4,
+         "shoulder_l": -0.5, "shoulder_r": 0.5,
+         "elbow_l": 0.1,    "elbow_r": 0.1,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.0,      "hip_r": 0.0,
+         "knee_l": -0.4,    "knee_r": -0.4,
+         "foot_l": 0.25,    "foot_r": 0.25},
+    ],
+
+    # ---------- POWER MOVES ----------
+    "bboy_windmill": [
+        {"torso": 0.5,   "neck": -0.4,  "head": -0.4,
+         "shoulder_l": -1.0, "shoulder_r": 1.0,
+         "elbow_l": 0.4,    "elbow_r": 0.4,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": -0.6,     "hip_r": 0.7,
+         "knee_l": -0.05,   "knee_r": -0.05,
+         "foot_l": 0.0,     "foot_r": -0.2},
+        {"torso": 0.3,   "neck": -0.5,  "head": -0.5,
+         "shoulder_l": -1.2, "shoulder_r": 1.2,
+         "elbow_l": 0.5,    "elbow_r": 0.5,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": -0.4,     "hip_r": -0.4,
+         "knee_l": -0.05,   "knee_r": -0.05,
+         "foot_l": -0.2,    "foot_r": -0.2},
+        {"torso": 0.5,   "neck": -0.4,  "head": -0.4,
+         "shoulder_l": 1.0,  "shoulder_r": -1.0,
+         "elbow_l": 0.4,    "elbow_r": 0.4,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.7,      "hip_r": -0.6,
+         "knee_l": -0.05,   "knee_r": -0.05,
+         "foot_l": -0.2,    "foot_r": 0.0},
+        {"torso": 0.4,   "neck": -0.4,  "head": -0.4,
+         "shoulder_l": -1.1, "shoulder_r": 1.1,
+         "elbow_l": 0.5,    "elbow_r": 0.5,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.6,      "hip_r": -0.6,
+         "knee_l": -0.05,   "knee_r": -0.05,
+         "foot_l": -0.1,    "foot_r": -0.1},
+    ],
+
+    "bboy_back_spin": [
+        {"torso": 0.0,   "neck": -0.5,  "head": -0.5,
+         "shoulder_l": -1.4, "shoulder_r": 1.4,
+         "elbow_l": 0.4,    "elbow_r": 0.4,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.7,      "hip_r": -0.7,
+         "knee_l": -0.05,   "knee_r": -0.05,
+         "foot_l": -0.2,    "foot_r": 0.2},
+        {"torso": 0.0,   "neck": -0.5,  "head": -0.5,
+         "shoulder_l": -1.3, "shoulder_r": 1.3,
+         "elbow_l": 0.6,    "elbow_r": 0.6,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.4,      "hip_r": -0.4,
+         "knee_l": -0.4,    "knee_r": -0.4,
+         "foot_l": -0.1,    "foot_r": 0.1},
+        {"torso": 0.0,   "neck": -0.5,  "head": -0.5,
+         "shoulder_l": -1.2, "shoulder_r": 1.2,
+         "elbow_l": 0.8,    "elbow_r": 0.8,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.2,      "hip_r": -0.2,
+         "knee_l": -1.2,    "knee_r": -1.2,
+         "foot_l": 0.6,     "foot_r": 0.6},
+        {"torso": 0.0,   "neck": -0.5,  "head": -0.5,
+         "shoulder_l": -1.3, "shoulder_r": 1.3,
+         "elbow_l": 0.5,    "elbow_r": 0.5,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.5,      "hip_r": -0.5,
+         "knee_l": -0.2,    "knee_r": -0.2,
+         "foot_l": -0.1,    "foot_r": 0.1},
+    ],
+
+    "bboy_macaco": [
+        {"torso": -0.4,  "neck": -0.6,  "head": -0.6,
+         "shoulder_l": -1.2, "shoulder_r": 1.2,
+         "elbow_l": 0.3,    "elbow_r": 0.3,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.05,     "hip_r": -0.05,
+         "knee_l": -0.5,    "knee_r": -0.2,
+         "foot_l": 0.3,     "foot_r": 0.05},
+        {"torso": 0.0,   "neck": -0.6,  "head": -0.6,
+         "shoulder_l": -1.4, "shoulder_r": 1.4,
+         "elbow_l": 0.1,    "elbow_r": 0.1,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": -0.3,     "hip_r": 0.3,
+         "knee_l": -0.05,   "knee_r": -0.05,
+         "foot_l": -0.1,    "foot_r": 0.1},
+        {"torso": 0.5,   "neck": -0.5,  "head": -0.5,
+         "shoulder_l": -1.4, "shoulder_r": 1.4,
+         "elbow_l": 0.1,    "elbow_r": 0.1,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": -0.5,     "hip_r": 0.5,
+         "knee_l": -0.05,   "knee_r": -0.05,
+         "foot_l": -0.3,    "foot_r": 0.3},
+        {"torso": 0.1,   "neck": -0.1,  "head": -0.1,
+         "shoulder_l": 0.5,  "shoulder_r": -0.5,
+         "elbow_l": 0.4,    "elbow_r": 0.4,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.0,      "hip_r": 0.0,
+         "knee_l": -0.5,    "knee_r": -0.5,
+         "foot_l": 0.3,     "foot_r": 0.3},
+    ],
+
+    # ---------- FREEZES ----------
+    "bboy_baby_freeze": [
+        {"torso": 0.5,   "neck": -0.3,  "head": -0.3,
+         "shoulder_l": -0.7, "shoulder_r": 0.7,
+         "elbow_l": 0.5,    "elbow_r": 0.5,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.05,     "hip_r": -0.05,
+         "knee_l": -0.8,    "knee_r": -0.8,
+         "foot_l": 0.5,     "foot_r": 0.5},
+        {"torso": 0.3,   "neck": -0.4,  "head": -0.4,
+         "shoulder_l": -1.0, "shoulder_r": 1.0,
+         "elbow_l": 0.2,    "elbow_r": 0.2,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.0,      "hip_r": 0.0,
+         "knee_l": -1.5,    "knee_r": -1.5,
+         "foot_l": 0.9,     "foot_r": 0.9},
+        {"torso": 0.0,   "neck": -0.5,  "head": -0.5,
+         "shoulder_l": -1.4, "shoulder_r": 1.4,
+         "elbow_l": 0.1,    "elbow_r": 0.1,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": -0.2,     "hip_r": 0.2,
+         "knee_l": -1.0,    "knee_r": -1.0,
+         "foot_l": 0.6,     "foot_r": 0.6},
+        {"torso": 0.0,   "neck": -0.5,  "head": -0.5,
+         "shoulder_l": -1.4, "shoulder_r": 1.4,
+         "elbow_l": 0.1,    "elbow_r": 0.1,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": -0.2,     "hip_r": 0.2,
+         "knee_l": -1.0,    "knee_r": -1.0,
+         "foot_l": 0.6,     "foot_r": 0.6},
+    ],
+
+    "bboy_air_chair": [
+        {"torso": 0.4,   "neck": -0.2,  "head": -0.2,
+         "shoulder_l": -0.5, "shoulder_r": 0.5,
+         "elbow_l": 0.6,    "elbow_r": 0.6,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.05,     "hip_r": -0.05,
+         "knee_l": -0.7,    "knee_r": -0.7,
+         "foot_l": 0.4,     "foot_r": 0.4},
+        {"torso": 0.6,   "neck": -0.3,  "head": -0.3,
+         "shoulder_l": -1.2, "shoulder_r": 0.3,
+         "elbow_l": 0.1,    "elbow_r": 0.8,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.2,      "hip_r": -0.2,
+         "knee_l": -0.4,    "knee_r": -0.4,
+         "foot_l": 0.3,     "foot_r": 0.3},
+        {"torso": 0.3,   "neck": -0.3,  "head": -0.3,
+         "shoulder_l": -1.4, "shoulder_r": 0.6,
+         "elbow_l": 0.1,    "elbow_r": 0.4,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.4,      "hip_r": -0.6,
+         "knee_l": -0.5,    "knee_r": -0.7,
+         "foot_l": 0.2,     "foot_r": 0.4},
+        {"torso": 0.3,   "neck": -0.3,  "head": -0.3,
+         "shoulder_l": -1.4, "shoulder_r": 0.6,
+         "elbow_l": 0.1,    "elbow_r": 0.4,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.4,      "hip_r": -0.6,
+         "knee_l": -0.5,    "knee_r": -0.7,
+         "foot_l": 0.2,     "foot_r": 0.4},
+    ],
+
+    "bboy_hollowback": [
+        {"torso": 0.4,   "neck": -0.2,  "head": -0.2,
+         "shoulder_l": -0.7, "shoulder_r": 0.7,
+         "elbow_l": 0.4,    "elbow_r": 0.4,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": 0.0,      "hip_r": 0.0,
+         "knee_l": -0.9,    "knee_r": -0.9,
+         "foot_l": 0.5,     "foot_r": 0.5},
+        {"torso": 0.1,   "neck": -0.4,  "head": -0.4,
+         "shoulder_l": -1.3, "shoulder_r": 1.3,
+         "elbow_l": 0.1,    "elbow_r": 0.1,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": -0.3,     "hip_r": 0.5,
+         "knee_l": -0.05,   "knee_r": -0.5,
+         "foot_l": -0.2,    "foot_r": 0.3},
+        {"torso": -0.3,  "neck": -0.5,  "head": -0.5,
+         "shoulder_l": -1.4, "shoulder_r": 1.4,
+         "elbow_l": 0.05,   "elbow_r": 0.05,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": -0.2,     "hip_r": 0.6,
+         "knee_l": -0.05,   "knee_r": -1.0,
+         "foot_l": -0.3,    "foot_r": 0.5},
+        {"torso": -0.3,  "neck": -0.5,  "head": -0.5,
+         "shoulder_l": -1.4, "shoulder_r": 1.4,
+         "elbow_l": 0.05,   "elbow_r": 0.05,
+         "hand_l": 0.0,     "hand_r": 0.0,
+         "hip_l": -0.2,     "hip_r": 0.6,
+         "knee_l": -0.05,   "knee_r": -1.0,
+         "foot_l": -0.3,    "foot_r": 0.5},
+    ],
 }
 
 # ── BASTE: per-move easing curves (Energy/Time quality) ───────────────────────
@@ -678,6 +1059,19 @@ MOVE_EASING: dict[str, str] = {
     "promenade_traveling":       "ease_in_out",
     "leap":                      "elastic",
     "spiral_traveling":          "ease_in_out",
+    # B-boy
+    "bboy_indian_step":          "snap_hold",
+    "bboy_karaoke_walk":         "snap_hold",
+    "bboy_cork_screw":           "elastic",
+    "bboy_six_step":             "ease_in_out",
+    "bboy_coffee_grinder":       "linear",
+    "bboy_spyder":               "ease_in_out",
+    "bboy_windmill":             "linear",
+    "bboy_back_spin":            "linear",
+    "bboy_macaco":               "elastic",
+    "bboy_baby_freeze":          "ease_out_cubic",
+    "bboy_air_chair":            "ease_out_cubic",
+    "bboy_hollowback":           "ease_out_cubic",
 }
 
 # ── BASTE: per-beat level offsets (Space — height/depth) ─────────────────────
@@ -699,6 +1093,19 @@ MOVE_LEVELS: dict[str, list[float]] = {
     "promenade_traveling":       [0.0,  0.0,  0.0,  0.0],
     "leap":                      [0.1, -0.3, -0.4,  0.05],
     "spiral_traveling":          [0.0,  0.05, 0.05, 0.0],
+    # B-boy — toprock bounces slightly; floor moves use positive (root shifts down toward floor)
+    "bboy_indian_step":          [0.05, 0.1,  0.05, 0.1],
+    "bboy_karaoke_walk":         [0.05, 0.1,  0.05, 0.1],
+    "bboy_cork_screw":           [0.1,  0.3,  0.5,  0.55],
+    "bboy_six_step":             [0.55, 0.5,  0.55, 0.55],
+    "bboy_coffee_grinder":       [0.5,  0.55, 0.5,  0.55],
+    "bboy_spyder":               [0.55, 0.55, 0.55, 0.55],
+    "bboy_windmill":             [0.4,  0.45, 0.4,  0.4],
+    "bboy_back_spin":            [0.5,  0.5,  0.5,  0.5],
+    "bboy_macaco":               [0.0, -0.2, -0.4,  0.05],
+    "bboy_baby_freeze":          [0.4,  0.5,  0.55, 0.55],
+    "bboy_air_chair":            [0.3,  0.45, 0.5,  0.5],
+    "bboy_hollowback":           [0.2, -0.1, -0.3, -0.3],
 }
 
 # ── BASTE: per-beat travel (Action — locomotor displacement) ─────────────────
@@ -719,6 +1126,27 @@ MOVE_TRAVEL: dict[str, list[float]] = {
     "promenade_traveling":       [0.06,  0.06,  0.06,  0.06],
     "leap":                      [0.0,   0.05,  0.1,   0.05],
     "spiral_traveling":          [-0.04,-0.04, -0.04, -0.04],
+    # B-boy — toprock gently lateral; floor/power moves stay in place
+    "bboy_indian_step":          [0.0,   0.0,   0.0,   0.0],
+    "bboy_karaoke_walk":         [0.03,  0.0,  -0.03,  0.0],
+    "bboy_cork_screw":           [0.0,   0.0,   0.0,   0.0],
+    "bboy_six_step":             [0.0,   0.0,   0.0,   0.0],
+    "bboy_coffee_grinder":       [0.0,   0.0,   0.0,   0.0],
+    "bboy_spyder":               [0.0,   0.0,   0.0,   0.0],
+    "bboy_windmill":             [0.0,   0.0,   0.0,   0.0],
+    "bboy_back_spin":            [0.0,   0.0,   0.0,   0.0],
+    "bboy_macaco":               [0.0,  -0.02, -0.04, -0.02],
+    "bboy_baby_freeze":          [0.0,   0.0,   0.0,   0.0],
+    "bboy_air_chair":            [0.0,   0.0,   0.0,   0.0],
+    "bboy_hollowback":           [0.0,   0.0,   0.0,   0.0],
+}
+
+# ── Inversion map — beats where figure renders 180° rotated (handstands/freezes) ──
+MOVE_INVERTED: dict[str, list[bool]] = {
+    "bboy_macaco":      [False, True,  True,  False],
+    "bboy_baby_freeze": [False, True,  True,  True],
+    "bboy_air_chair":   [False, False, True,  True],
+    "bboy_hollowback":  [False, True,  True,  True],
 }
 
 # ── Category lookup — weighted by audio energy ─────────────────────────────────
@@ -735,6 +1163,12 @@ DAVIS_DRAMATIC     = [
 LOCOMOTOR          = [
     "promenade_traveling", "leap", "spiral_traveling",
 ]
+BBOY_TOPROCK  = ["bboy_indian_step", "bboy_karaoke_walk"]
+BBOY_DROP     = ["bboy_cork_screw"]
+BBOY_FOOTWORK = ["bboy_six_step", "bboy_coffee_grinder", "bboy_spyder"]
+BBOY_POWER    = ["bboy_windmill", "bboy_back_spin", "bboy_macaco"]
+BBOY_FREEZE   = ["bboy_baby_freeze", "bboy_air_chair", "bboy_hollowback"]
+_ON_FLOOR     = BBOY_FOOTWORK + BBOY_FREEZE + BBOY_POWER
 
 
 # ── Dance state machine ────────────────────────────────────────────────────────
@@ -751,18 +1185,45 @@ class DanceState:
         self.recent_moves: list[str] = []
 
     def pick_next_move(self, energy: float) -> str:
-        if energy < 0.3:
-            pool    = HILLGROVE_FORMAL + DAVIS_TRANSITIONAL[:1]
-            weights = [3] * len(HILLGROVE_FORMAL) + [1]
-        elif energy < 0.6:
-            pool    = (DAVIS_TRANSITIONAL + HILLGROVE_FORMAL[:2]
-                       + DAVIS_DRAMATIC[:1] + LOCOMOTOR[:1])
-            weights = [3] * len(DAVIS_TRANSITIONAL) + [2, 2, 1, 2]
+        last_move = self.recent_moves[-1] if self.recent_moves else None
+
+        if energy < 0.25:
+            pool    = HILLGROVE_FORMAL + DAVIS_TRANSITIONAL[:1] + BBOY_TOPROCK[:1]
+            weights = [3] * len(HILLGROVE_FORMAL) + [1, 1]
+        elif energy < 0.5:
+            pool    = (DAVIS_TRANSITIONAL + BBOY_TOPROCK +
+                       HILLGROVE_FORMAL[:2] + DAVIS_DRAMATIC[:1])
+            weights = ([3] * len(DAVIS_TRANSITIONAL) + [3] * len(BBOY_TOPROCK) +
+                       [1, 1, 1])
+        elif energy < 0.75:
+            pool    = (DAVIS_DRAMATIC + BBOY_FOOTWORK + BBOY_FREEZE +
+                       BBOY_TOPROCK + BBOY_DROP)
+            weights = ([3] * len(DAVIS_DRAMATIC) + [3] * len(BBOY_FOOTWORK) +
+                       [2] * len(BBOY_FREEZE) + [2] * len(BBOY_TOPROCK) +
+                       [3] * len(BBOY_DROP))
         else:
-            pool    = DAVIS_DRAMATIC + DAVIS_TRANSITIONAL[:1] + LOCOMOTOR
-            weights = [3] * len(DAVIS_DRAMATIC) + [1, 2, 3, 2]
+            pool    = (BBOY_POWER + BBOY_FOOTWORK + BBOY_FREEZE +
+                       BBOY_DROP + DAVIS_DRAMATIC[:2])
+            weights = ([5] * len(BBOY_POWER) + [3] * len(BBOY_FOOTWORK) +
+                       [2] * len(BBOY_FREEZE) + [2] * len(BBOY_DROP) + [1, 1])
 
         wts = list(weights)
+
+        # Floor continuity: once on the ground, bias staying there
+        if last_move in _ON_FLOOR:
+            for i, m in enumerate(pool):
+                if m in _ON_FLOOR:
+                    wts[i] = int(wts[i] * 1.6)
+
+        # Drop must flow into footwork — no popping straight back up
+        if last_move in BBOY_DROP:
+            for i, m in enumerate(pool):
+                if m in BBOY_FOOTWORK:
+                    wts[i] = int(wts[i] * 3)
+                elif m not in _ON_FLOOR:
+                    wts[i] = 0
+
+        # Avoid last 2 moves
         for recent in self.recent_moves[-2:]:
             if recent in pool:
                 wts[pool.index(recent)] = 0
@@ -998,6 +1459,12 @@ while True:
     root_y_actual = root_y_base + root_y_offset
 
     world_pos = compute_world_positions(root_x_actual, root_y_actual)
+
+    # Inversion: handstands / freezes / macaco peak render 180° around root
+    _inv_flags = MOVE_INVERTED.get(dance_state.current_move, [False, False, False, False])
+    if _inv_flags[dance_state.move_beat]:
+        _rx, _ry = root_x_actual, root_y_actual
+        world_pos = {n: (2 * _rx - x, 2 * _ry - y) for n, (x, y) in world_pos.items()}
 
     # Draw — trail first, figure on top
     screen.fill((0, 0, 0))
