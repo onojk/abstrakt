@@ -47,7 +47,7 @@ if DANCE_CHARACTER not in ("skeleton", "cat", "clusters"):
     DANCE_CHARACTER = "skeleton"
 SKELETON_MODE   = os.environ.get("DANCE_SKELETON", "1") == "1"
 if DANCE_CHARACTER == "clusters":
-    _default_trail = 0.82
+    _default_trail = 0.75
 elif DANCE_CHARACTER == "cat":
     _default_trail = 0.85
 elif SKELETON_MODE:
@@ -1957,46 +1957,46 @@ def render_cat(surface: pygame.Surface,
 # ── Abstract cluster character rendering ──────────────────────────────────────
 
 def generate_cluster_population(rng: random.Random) -> list:
-    """Generate ~120 cluster instances across 3 depth tiers."""
+    """Generate ~360 cluster instances across 3 depth tiers."""
     _joints  = ["head", "torso", "hand_l", "hand_r", "foot_l", "foot_r",
                 "shoulder_l", "shoulder_r", "hip_l", "hip_r",
                 "elbow_l", "elbow_r", "knee_l", "knee_r", "neck", "root"]
-    _styles  = ["spike", "tendril", "lightning", "spiral", "comet", "web"]
+    _styles  = ["tendril", "lightning", "spiral", "comet", "web"]
     _palettes = list(CLUSTER_PALETTES.keys())
     _bands   = ["bass", "mid", "high"]
     pop      = []
 
-    # FOREGROUND — 12 dramatic large clusters, close to body
-    for i in range(12):
+    # FOREGROUND — 36 dramatic large clusters, close to body
+    for i in range(36):
         pop.append({"name": f"fg_{i}", "tier": "fg",
                     "anchor":    rng.choice(_joints),
                     "style":     rng.choice(_styles),
                     "palette":   rng.choice(_palettes),
                     "band":      rng.choice(_bands),
-                    "offset_x":  rng.uniform(-150, 150),
-                    "offset_y":  rng.uniform(-100, 100),
+                    "offset_x":  rng.uniform(-200, 200),
+                    "offset_y":  rng.uniform(-130, 130),
                     "scale_mult": rng.uniform(2.5, 3.5)})
 
-    # MIDGROUND — 36 medium clusters, moderate spread
-    for i in range(36):
+    # MIDGROUND — 108 medium clusters, moderate spread
+    for i in range(108):
         pop.append({"name": f"mg_{i}", "tier": "mg",
                     "anchor":    rng.choice(_joints),
                     "style":     rng.choice(_styles),
                     "palette":   rng.choice(_palettes),
                     "band":      rng.choice(_bands),
-                    "offset_x":  rng.uniform(-300, 300),
-                    "offset_y":  rng.uniform(-200, 200),
+                    "offset_x":  rng.uniform(-350, 350),
+                    "offset_y":  rng.uniform(-220, 220),
                     "scale_mult": rng.uniform(0.8, 1.4)})
 
-    # BACKGROUND — 72 small ambient clusters, full canvas scatter
-    for i in range(72):
+    # BACKGROUND — 216 small ambient clusters, full canvas scatter
+    for i in range(216):
         pop.append({"name": f"bg_{i}", "tier": "bg",
                     "anchor":    rng.choice(_joints),
                     "style":     rng.choice(_styles),
                     "palette":   rng.choice(_palettes),
                     "band":      rng.choice(_bands),
-                    "offset_x":  rng.uniform(-450, 450),
-                    "offset_y":  rng.uniform(-260, 260),
+                    "offset_x":  rng.uniform(-500, 500),
+                    "offset_y":  rng.uniform(-280, 280),
                     "scale_mult": rng.uniform(0.3, 0.6)})
     return pop
 
@@ -2048,42 +2048,12 @@ class ClusterBase:
     def render(self, surface, scale, hue_shift=0.0):    raise NotImplementedError
 
 
-class SpikeBurst(ClusterBase):
-    """Sea-urchin style — straight rigid lines radiating from anchor, bass-driven."""
-    def __init__(self, anchor_joint, palette, audio_band, tier="mg"):
-        super().__init__(anchor_joint, palette, audio_band)
-        self.n_spikes        = 24 if tier == "fg" else (12 if tier == "mg" else 5)
-        self.base_radius     = 30
-        self.spike_lengths   = [1.0] * self.n_spikes
-        self.anchor          = (0.0, 0.0)
-        self.energy_response = 0.0
-
-    def update(self, anchor_pos, audio, t, scale, rng):
-        self.anchor          = anchor_pos
-        self.energy_response = self.energy_response * 0.7 + audio[self.audio_band] * 0.3
-        for i in range(self.n_spikes):
-            phase = (i / self.n_spikes) * math.tau
-            self.spike_lengths[i] = (0.7 + 0.3 * math.sin(t * 2 + phase)
-                                     + self.energy_response * 1.5)
-
-    def render(self, surface, scale, hue_shift=0.0):
-        ax, ay = self.anchor
-        for i in range(self.n_spikes):
-            angle  = (i / self.n_spikes) * math.tau
-            length = self.base_radius * scale * self.spike_lengths[i]
-            ex     = ax + math.cos(angle) * length
-            ey     = ay + math.sin(angle) * length
-            color  = shift_hue(self.palette[i % len(self.palette)], hue_shift)
-            pygame.draw.line(surface, color,
-                             (int(ax), int(ay)), (int(ex), int(ey)),
-                             max(2, int(3 * scale)))
-
 
 class TendrilSwirl(ClusterBase):
     """Jellyfish tendrils — wavy curling lines sweeping slowly, mid-driven."""
     def __init__(self, anchor_joint, palette, audio_band, tier="mg"):
         super().__init__(anchor_joint, palette, audio_band)
-        self.n_tendrils           = 16 if tier == "fg" else (8 if tier == "mg" else 4)
+        self.n_tendrils           = 16 if tier == "fg" else (8 if tier == "mg" else 3)
         self.tendril_phase_offsets = [i * 0.3 for i in range(self.n_tendrils)]
         self.anchor               = (0.0, 0.0)
         self.t                    = 0.0
@@ -2103,8 +2073,8 @@ class TendrilSwirl(ClusterBase):
             prev_x, prev_y = ax, ay
             for j in range(1, 13):
                 t_along = j / 12
-                dist    = (15 + 35 * t_along) * scale * (1.0 + self.energy_response)
-                curl    = math.sin(self.t * 1.5 + phase + t_along * 3) * 0.6
+                dist    = (15 + 50 * t_along) * scale * (1.0 + self.energy_response * 2.0)
+                curl    = math.sin(self.t * 2.5 + phase + t_along * 4) * 1.4
                 a       = base_angle + curl
                 px      = ax + math.cos(a) * dist
                 py      = ay + math.sin(a) * dist
@@ -2118,7 +2088,7 @@ class Lightning(ClusterBase):
     """Sharp jagged zigzag lines, snap into existence on transients, high-driven."""
     def __init__(self, anchor_joint, palette, audio_band, tier="mg"):
         super().__init__(anchor_joint, palette, audio_band)
-        self.max_bolts           = 8 if tier == "fg" else (5 if tier == "mg" else 2)
+        self.max_bolts           = 16 if tier == "fg" else (16 if tier == "mg" else 1)
         self.bolts               = []
         self.anchor              = (0.0, 0.0)
         self.last_trigger_energy = 0.0
@@ -2126,13 +2096,13 @@ class Lightning(ClusterBase):
     def update(self, anchor_pos, audio, t, scale, rng):
         self.anchor = anchor_pos
         cur_e       = audio[self.audio_band]
-        if (cur_e > self.last_trigger_energy * 1.3
-                and cur_e > 0.05
+        if (cur_e > self.last_trigger_energy * 1.2
+                and cur_e > 0.2
                 and len(self.bolts) < self.max_bolts):
             ax, ay      = self.anchor
             angle       = rng.uniform(0, math.tau)
-            length      = 50 * scale * (0.5 + cur_e)
-            zigzag_amp  = 8 * scale
+            length      = 90 * scale * (0.5 + cur_e * 1.8)
+            zigzag_amp  = 18 * scale
             path        = [(ax, ay)]
             for j in range(1, 7):
                 t_along   = j / 6
@@ -2172,7 +2142,7 @@ class SpiralArms(ClusterBase):
     def update(self, anchor_pos, audio, t, scale, rng):
         self.anchor          = anchor_pos
         self.energy_response = self.energy_response * 0.8 + audio[self.audio_band] * 0.2
-        self.rotation       += 0.03 + self.energy_response * 0.1
+        self.rotation       += 0.08 + self.energy_response * 0.25
 
     def render(self, surface, scale, hue_shift=0.0):
         ax, ay = self.anchor
@@ -2183,7 +2153,7 @@ class SpiralArms(ClusterBase):
             for j in range(1, 21):
                 t_along = j / 20
                 radius  = min(5 * scale + math.exp(t_along * 2) * 5 * scale,
-                              60 * scale * (1.0 + self.energy_response))
+                              100 * scale * (1.0 + self.energy_response * 2.0))
                 angle   = arm_offset + t_along * math.tau * 0.8
                 px      = ax + math.cos(angle) * radius
                 py      = ay + math.sin(angle) * radius
@@ -2197,16 +2167,16 @@ class CometTrails(ClusterBase):
     """Short bright particles moving outward with fading trail, high-driven spawn rate."""
     def __init__(self, anchor_joint, palette, audio_band, tier="mg"):
         super().__init__(anchor_joint, palette, audio_band)
-        self.max_comets = 12 if tier == "fg" else (6 if tier == "mg" else 2)
+        self.max_comets = 12 if tier == "fg" else (6 if tier == "mg" else 3)
         self.comets     = []
         self.anchor     = (0.0, 0.0)
 
     def update(self, anchor_pos, audio, t, scale, rng):
         self.anchor  = anchor_pos
-        spawn_chance = 0.1 + audio[self.audio_band] * 0.5
+        spawn_chance = 0.18 + audio[self.audio_band] * 1.0
         if rng.random() < spawn_chance and len(self.comets) < self.max_comets:
             angle = rng.uniform(0, math.tau)
-            speed = (3 + rng.uniform(0, 2)) * scale
+            speed = (5 + rng.uniform(0, 4)) * scale
             ax, ay = self.anchor
             self.comets.append({
                 "x": ax, "y": ay,
@@ -2220,7 +2190,7 @@ class CometTrails(ClusterBase):
             c["x"]  += c["vx"]
             c["y"]  += c["vy"]
             c["trail"].append((c["x"], c["y"]))
-            if len(c["trail"]) > 8:
+            if len(c["trail"]) > 16:
                 c["trail"].pop(0)
             c["life"] -= 0.04
         self.comets = [c for c in self.comets if c["life"] > 0]
@@ -2242,7 +2212,7 @@ class WebCrackle(ClusterBase):
     """Tight node web pulsing outward on bass hits."""
     def __init__(self, anchor_joint, palette, audio_band, tier="mg"):
         super().__init__(anchor_joint, palette, audio_band)
-        self.n_nodes     = 14 if tier == "fg" else (10 if tier == "mg" else 6)
+        self.n_nodes     = 14 if tier == "fg" else (10 if tier == "mg" else 5)
         self.node_radii  = [0.5 + i * 0.05 for i in range(self.n_nodes)]
         self.node_angles = [(i / self.n_nodes) * math.tau + 0.3 * math.sin(i * 0.7)
                             for i in range(self.n_nodes)]
@@ -2253,7 +2223,7 @@ class WebCrackle(ClusterBase):
     def update(self, anchor_pos, audio, t, scale, rng):
         self.anchor    = anchor_pos
         self.t         = t
-        target         = 1.0 + audio[self.audio_band] * 0.8
+        target         = 1.0 + audio[self.audio_band] * 1.8
         self.expansion = self.expansion * 0.85 + target * 0.15
 
     def render(self, surface, scale, hue_shift=0.0):
@@ -2261,7 +2231,7 @@ class WebCrackle(ClusterBase):
         nodes  = []
         for r, a in zip(self.node_radii, self.node_angles):
             radius = r * 25 * scale * self.expansion
-            wiggle = math.sin(self.t * 2 + a * 3) * 1.5 * scale
+            wiggle = math.sin(self.t * 3.5 + a * 3) * 4.0 * scale
             nodes.append((ax + math.cos(a) * (radius + wiggle),
                            ay + math.sin(a) * (radius + wiggle)))
         for i, n in enumerate(nodes):
@@ -2276,7 +2246,7 @@ class WebCrackle(ClusterBase):
 
 
 def make_clusters(rng: random.Random) -> list:
-    cls_map  = {"spike": SpikeBurst, "tendril": TendrilSwirl,
+    cls_map  = {"tendril": TendrilSwirl,
                 "lightning": Lightning, "spiral": SpiralArms,
                 "comet": CometTrails, "web": WebCrackle}
     result   = []
@@ -2315,8 +2285,8 @@ def render_clusters(surface: pygame.Surface,
         jx, jy        = positions.get(cluster.anchor_joint, fallback)
         anchor_pos    = (jx + cluster.offset_x, jy + cluster.offset_y)
         cluster_scale = scale * cluster.scale_mult
-        # Background clusters update every 3rd frame to save CPU
-        if getattr(cluster, "tier", "mg") != "bg" or frame_idx % 3 == 0:
+        # Background clusters update every 5th frame to save CPU
+        if getattr(cluster, "tier", "mg") != "bg" or frame_idx % 5 == 0:
             cluster.update(anchor_pos, bands, t, cluster_scale, rng)
         cluster.render(surface, cluster_scale, hue_shift)
 
