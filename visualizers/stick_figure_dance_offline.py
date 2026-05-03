@@ -1957,13 +1957,13 @@ def render_cat(surface: pygame.Surface,
 # ── Abstract cluster character rendering ──────────────────────────────────────
 
 CLUSTER_DEFINITIONS = [
-    # (name, anchor_joint, style, palette_key, audio_band)
-    ("spike_burst",   "head",   "spike",     "magenta", "bass"),
-    ("tendril_swirl", "torso",  "tendril",   "cyan",    "mid"),
-    ("lightning",     "hand_l", "lightning", "yellow",  "high"),
-    ("spiral_arms",   "hand_r", "spiral",    "lime",    "mid"),
-    ("comet_trails",  "foot_l", "comet",     "orange",  "high"),
-    ("web_crackle",   "foot_r", "web",       "violet",  "bass"),
+    # (name, anchor_joint, style, palette_key, audio_band, offset_x, offset_y, scale_mult)
+    ("spike_burst",   "head",   "spike",     "magenta", "bass",  -180,  -60, 1.4),
+    ("tendril_swirl", "torso",  "tendril",   "cyan",    "mid",    200,    0, 1.6),
+    ("lightning",     "hand_l", "lightning", "yellow",  "high",   -50,   80, 0.8),
+    ("spiral_arms",   "hand_r", "spiral",    "lime",    "mid",    100, -120, 1.0),
+    ("comet_trails",  "foot_l", "comet",     "orange",  "high",  -250,  100, 1.2),
+    ("web_crackle",   "foot_r", "web",       "violet",  "bass",   220,  120, 1.8),
 ]
 
 CLUSTER_PALETTES: dict[str, list] = {
@@ -1976,6 +1976,34 @@ CLUSTER_PALETTES: dict[str, list] = {
 }
 
 
+def shift_hue(rgb: tuple, hue_offset: float) -> tuple:
+    """Rotate an RGB color through HSV hue space by hue_offset (0..1)."""
+    r, g, b = rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0
+    h, s, v = colorsys.rgb_to_hsv(r, g, b)
+    nr, ng, nb = colorsys.hsv_to_rgb((h + hue_offset) % 1.0, s, v)
+    return (int(nr * 255), int(ng * 255), int(nb * 255))
+
+
+class HueCycler:
+    """Global hue offset that advances 30° on each detected beat onset."""
+    def __init__(self) -> None:
+        self.hue_offset  = 0.0
+        self.target      = 0.0
+        self._last_beat  = False
+
+    def update(self, beat_active: bool) -> float:
+        if beat_active and not self._last_beat:
+            self.target = (self.target + 1.0 / 12.0) % 1.0
+        self._last_beat = beat_active
+        diff = self.target - self.hue_offset
+        if diff > 0.5:
+            self.hue_offset += 1.0
+        elif diff < -0.5:
+            self.hue_offset -= 1.0
+        self.hue_offset += (self.target - self.hue_offset) * 0.2
+        return self.hue_offset % 1.0
+
+
 class ClusterBase:
     def __init__(self, anchor_joint: str, palette: list, audio_band: str) -> None:
         self.anchor_joint = anchor_joint
@@ -1983,7 +2011,7 @@ class ClusterBase:
         self.audio_band   = audio_band
 
     def update(self, anchor_pos, audio, t, scale, rng): raise NotImplementedError
-    def render(self, surface, scale):                   raise NotImplementedError
+    def render(self, surface, scale, hue_shift=0.0):    raise NotImplementedError
 
 
 class SpikeBurst(ClusterBase):
@@ -2004,14 +2032,14 @@ class SpikeBurst(ClusterBase):
             self.spike_lengths[i] = (0.7 + 0.3 * math.sin(t * 2 + phase)
                                      + self.energy_response * 1.5)
 
-    def render(self, surface, scale):
+    def render(self, surface, scale, hue_shift=0.0):
         ax, ay = self.anchor
         for i in range(self.n_spikes):
             angle  = (i / self.n_spikes) * math.tau
             length = self.base_radius * scale * self.spike_lengths[i]
             ex     = ax + math.cos(angle) * length
             ey     = ay + math.sin(angle) * length
-            color  = self.palette[i % len(self.palette)]
+            color  = shift_hue(self.palette[i % len(self.palette)], hue_shift)
             pygame.draw.line(surface, color,
                              (int(ax), int(ay)), (int(ex), int(ey)),
                              max(2, int(3 * scale)))
@@ -2032,12 +2060,12 @@ class TendrilSwirl(ClusterBase):
         self.t               = t
         self.energy_response = self.energy_response * 0.85 + audio[self.audio_band] * 0.15
 
-    def render(self, surface, scale):
+    def render(self, surface, scale, hue_shift=0.0):
         ax, ay = self.anchor
         for i in range(self.n_tendrils):
             base_angle = (i / self.n_tendrils) * math.tau
             phase      = self.tendril_phase_offsets[i]
-            color      = self.palette[i % len(self.palette)]
+            color      = shift_hue(self.palette[i % len(self.palette)], hue_shift)
             prev_x, prev_y = ax, ay
             for j in range(1, 13):
                 t_along = j / 12
@@ -2085,10 +2113,10 @@ class Lightning(ClusterBase):
             bolt["life"] -= 0.08
         self.bolts = [b for b in self.bolts if b["life"] > 0]
 
-    def render(self, surface, scale):
+    def render(self, surface, scale, hue_shift=0.0):
         for bolt in self.bolts:
             life  = bolt["life"]
-            color = tuple(int(c * life) for c in bolt["color"])
+            color = tuple(int(c * life) for c in shift_hue(bolt["color"], hue_shift))
             path  = bolt["path"]
             for i in range(len(path) - 1):
                 pygame.draw.line(surface, color,
@@ -2111,11 +2139,11 @@ class SpiralArms(ClusterBase):
         self.energy_response = self.energy_response * 0.8 + audio[self.audio_band] * 0.2
         self.rotation       += 0.03 + self.energy_response * 0.1
 
-    def render(self, surface, scale):
+    def render(self, surface, scale, hue_shift=0.0):
         ax, ay = self.anchor
         for arm_i in range(self.n_arms):
             arm_offset     = (arm_i / self.n_arms) * math.tau + self.rotation
-            color          = self.palette[arm_i % len(self.palette)]
+            color          = shift_hue(self.palette[arm_i % len(self.palette)], hue_shift)
             prev_x, prev_y = ax, ay
             for j in range(1, 21):
                 t_along = j / 20
@@ -2161,12 +2189,13 @@ class CometTrails(ClusterBase):
             c["life"] -= 0.04
         self.comets = [c for c in self.comets if c["life"] > 0]
 
-    def render(self, surface, scale):
+    def render(self, surface, scale, hue_shift=0.0):
         for c in self.comets:
-            trail = c["trail"]
+            trail      = c["trail"]
+            base_color = shift_hue(c["color"], hue_shift)
             for i in range(len(trail) - 1):
                 fade  = ((i + 1) / len(trail)) * c["life"]
-                color = tuple(int(ch * fade) for ch in c["color"])
+                color = tuple(int(ch * fade) for ch in base_color)
                 pygame.draw.line(surface, color,
                                  (int(trail[i][0]),     int(trail[i][1])),
                                  (int(trail[i + 1][0]), int(trail[i + 1][1])),
@@ -2191,7 +2220,7 @@ class WebCrackle(ClusterBase):
         target         = 1.0 + audio[self.audio_band] * 0.8
         self.expansion = self.expansion * 0.85 + target * 0.15
 
-    def render(self, surface, scale):
+    def render(self, surface, scale, hue_shift=0.0):
         ax, ay = self.anchor
         nodes  = []
         for r, a in zip(self.node_radii, self.node_angles):
@@ -2200,7 +2229,7 @@ class WebCrackle(ClusterBase):
             nodes.append((ax + math.cos(a) * (radius + wiggle),
                            ay + math.sin(a) * (radius + wiggle)))
         for i, n in enumerate(nodes):
-            color  = self.palette[i % len(self.palette)]
+            color  = shift_hue(self.palette[i % len(self.palette)], hue_shift)
             n_next = nodes[(i + 1) % self.n_nodes]
             pygame.draw.line(surface, color,
                              (int(ax), int(ay)), (int(n[0]), int(n[1])),
@@ -2211,14 +2240,19 @@ class WebCrackle(ClusterBase):
 
 
 def make_clusters() -> list:
-    result = []
-    for _name, anchor, style, palette_key, band in CLUSTER_DEFINITIONS:
-        palette = CLUSTER_PALETTES[palette_key]
-        cls_map = {"spike": SpikeBurst, "tendril": TendrilSwirl,
-                   "lightning": Lightning, "spiral": SpiralArms,
-                   "comet": CometTrails, "web": WebCrackle}
-        if style in cls_map:
-            result.append((_name, cls_map[style](anchor, palette, band)))
+    cls_map = {"spike": SpikeBurst, "tendril": TendrilSwirl,
+               "lightning": Lightning, "spiral": SpiralArms,
+               "comet": CometTrails, "web": WebCrackle}
+    result  = []
+    for entry in CLUSTER_DEFINITIONS:
+        _name, anchor, style, palette_key, band, ox, oy, scale_mult = entry
+        if style not in cls_map:
+            continue
+        c             = cls_map[style](anchor, CLUSTER_PALETTES[palette_key], band)
+        c.offset_x    = ox
+        c.offset_y    = oy
+        c.scale_mult  = scale_mult
+        result.append((_name, c))
     return result
 
 
@@ -2228,7 +2262,8 @@ def render_clusters(surface: pygame.Surface,
                     t: float,
                     scale: float,
                     rng: random.Random,
-                    all_clusters: list) -> None:
+                    all_clusters: list,
+                    hue_shift: float = 0.0) -> None:
     """Render all cluster creatures. lag_bands values are raw FFT-level; scaled here."""
     bands = {
         "bass": min(1.0, lag_bands["bass"] * 6.0),
@@ -2237,9 +2272,11 @@ def render_clusters(surface: pygame.Surface,
     }
     fallback = positions.get("torso", (WIDTH // 2, HEIGHT // 2))
     for _name, cluster in all_clusters:
-        anchor_pos = positions.get(cluster.anchor_joint, fallback)
-        cluster.update(anchor_pos, bands, t, scale, rng)
-        cluster.render(surface, scale)
+        jx, jy        = positions.get(cluster.anchor_joint, fallback)
+        anchor_pos    = (jx + cluster.offset_x, jy + cluster.offset_y)
+        cluster_scale = scale * cluster.scale_mult
+        cluster.update(anchor_pos, bands, t, cluster_scale, rng)
+        cluster.render(surface, cluster_scale, hue_shift)
 
 
 # ── Analyzer ───────────────────────────────────────────────────────────────────
@@ -2291,8 +2328,9 @@ def _read_samples(n: int):
 _fft_buf = np.zeros(N_FFT, dtype=np.float32)
 _an      = Analyzer(N_FFT)
 
-cat_tail    = CatTail()      if DANCE_CHARACTER == "cat"      else None
+cat_tail     = CatTail()       if DANCE_CHARACTER == "cat"      else None
 all_clusters = make_clusters() if DANCE_CHARACTER == "clusters" else []
+hue_cycler   = HueCycler()
 sparkles: list = []
 
 # ── pygame surfaces ────────────────────────────────────────────────────────────
@@ -2353,6 +2391,7 @@ while True:
 
     # Normalize energy every frame; use normalized value for move selection
     normalized_energy = energy_tracker.update_and_normalize(feat["energy"])
+    hue_shift = hue_cycler.update(bool(feat["onset"]))
 
     # Detect beat crossing — reset travel accumulator for clean delta tracking
     if beat_phase < prev_beat_phase:
@@ -2407,7 +2446,7 @@ while True:
     screen.fill((0, 0, 0))
     screen.blit(trail_surface, (0, 0))
     if DANCE_CHARACTER == "clusters":
-        render_clusters(screen, world_pos, lag_state, t_sec, _total_scale, rng, all_clusters)
+        render_clusters(screen, world_pos, lag_state, t_sec, _total_scale, rng, all_clusters, hue_shift)
     elif DANCE_CHARACTER == "cat":
         cat_tail.update(SKELETON["torso"].angle)
         render_cat(screen, world_pos, _total_scale, cat_tail)
