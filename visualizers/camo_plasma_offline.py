@@ -23,7 +23,7 @@ import time
 import wave
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 # ── Pillow resampling compat (< 9.1 vs ≥ 9.1) ─────────────────────────────────
 _BILINEAR = getattr(Image.Resampling, "BILINEAR", Image.BILINEAR)
@@ -132,11 +132,49 @@ def _blob_polygon(
     return list(zip(xs.tolist(), ys.tolist()))
 
 
+def _draw_leaf(
+    draw: "ImageDraw.ImageDraw",
+    cx: float, cy: float, angle: float,
+    fill: tuple, scale: float,
+) -> None:
+    """Elongated almond shape, ~3:1 aspect, sharp-pointed ends."""
+    L = 28.0 * scale
+    W = 9.0 * scale
+    cos_a, sin_a = math.cos(angle), math.sin(angle)
+    n = 14
+    pts: list[tuple[float, float]] = []
+    for i in range(n + 1):
+        t = i / n
+        x = -L / 2 + L * t
+        y = -W * math.sin(t * math.pi)
+        pts.append((cx + x * cos_a - y * sin_a, cy + x * sin_a + y * cos_a))
+    for i in range(n + 1):
+        t = i / n
+        x = L / 2 - L * t
+        y = W * math.sin(t * math.pi)
+        pts.append((cx + x * cos_a - y * sin_a, cy + x * sin_a + y * cos_a))
+    draw.polygon(pts, fill=fill)
+
+
+def _draw_chisel(
+    draw: "ImageDraw.ImageDraw",
+    cx: float, cy: float, angle: float,
+    fill: tuple, scale: float,
+) -> None:
+    """Sharp-cornered rectangle oriented along travel direction."""
+    L = 22.0 * scale
+    W = 7.0 * scale
+    cos_a, sin_a = math.cos(angle), math.sin(angle)
+    corners = [(-L / 2, -W / 2), (L / 2, -W / 2), (L / 2, W / 2), (-L / 2, W / 2)]
+    pts = [(cx + x * cos_a - y * sin_a, cy + x * sin_a + y * cos_a) for x, y in corners]
+    draw.polygon(pts, fill=fill)
+
+
 def _paint_substrate() -> np.ndarray:
     """Return (SUB_H, SUB_W, 3) uint8 RGB camo substrate."""
     print(f"[camo_plasma] Painting substrate {_SUB_W}×{_SUB_H}...", flush=True)
     t0  = time.time()
-    img = Image.new("RGB", (_SUB_W, _SUB_H), PALETTE[0])
+    img = Image.new("RGBA", (_SUB_W, _SUB_H), PALETTE[0] + (255,))
     draw = ImageDraw.Draw(img)
 
     # Scale stroke count to canvas area relative to reference (1920*4 × 1080*1.3)
@@ -183,6 +221,15 @@ def _paint_substrate() -> np.ndarray:
         n_stamps = int(rng.integers(3, 9))
         smooth_r = float(rng.uniform(0.0, math.tau))
 
+        r_brush = float(rng.random())
+        if r_brush < 0.5:
+            brush_type = 'blob'
+        elif r_brush < 0.8:
+            brush_type = 'leaf'
+        else:
+            brush_type = 'chisel'
+        brush_scale = blob_r / 15.0
+
         for si in range(n_stamps):
             u    = si / max(n_stamps - 1, 1)
             pos  = u * (len(path_x) - 1)
@@ -212,13 +259,18 @@ def _paint_substrate() -> np.ndarray:
                 lit = min(0.92, lit + 0.15)
 
             rr, gg, bb = colorsys.hls_to_rgb(hue, lit, sat)
-            colour = (int(rr * 255), int(gg * 255), int(bb * 255))
+            colour = (int(rr * 255), int(gg * 255), int(bb * 255), 210)
 
-            poly = _blob_polygon(cx, cy, blob_r, smooth_r,
-                                 float(rng.uniform(0.0, math.tau)))
-            draw.polygon(poly, fill=colour)
+            phase = float(rng.uniform(0.0, math.tau))
+            if brush_type == 'blob':
+                poly = _blob_polygon(cx, cy, blob_r, smooth_r, phase)
+                draw.polygon(poly, fill=colour)
+            elif brush_type == 'leaf':
+                _draw_leaf(draw, cx, cy, smooth_r, colour, brush_scale)
+            else:
+                _draw_chisel(draw, cx, cy, smooth_r, colour, brush_scale)
 
-    arr = np.array(img)
+    arr = np.array(img.convert("RGB"))
     print(f"[camo_plasma] Substrate painted in {time.time() - t0:.1f}s", flush=True)
     return arr
 
@@ -351,6 +403,11 @@ def _build_substrate() -> np.ndarray:
         f" + {_MICRO_ITER} micro × {_N_MICRO} centres)",
         flush=True,
     )
+    t_sharp = time.time()
+    pil_sub = Image.fromarray(substrate)
+    pil_sub = pil_sub.filter(ImageFilter.UnsharpMask(radius=1.5, percent=120, threshold=3))
+    substrate = np.array(pil_sub)
+    print(f"[camo_plasma] Unsharp mask in {time.time()-t_sharp:.1f}s", flush=True)
     return substrate
 
 
