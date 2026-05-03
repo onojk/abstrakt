@@ -1192,9 +1192,9 @@ class DanceState:
     def pick_next_move(self, energy: float) -> str:
         last_move = self.recent_moves[-1] if self.recent_moves else None
 
-        if energy < 0.25:
-            pool    = HILLGROVE_FORMAL + DAVIS_TRANSITIONAL[:1] + BBOY_TOPROCK[:1]
-            weights = [3] * len(HILLGROVE_FORMAL) + [1, 1]
+        if energy < 0.30:
+            pool    = HILLGROVE_FORMAL + DAVIS_TRANSITIONAL[:2] + BBOY_TOPROCK[:1]
+            weights = [2] * len(HILLGROVE_FORMAL) + [2, 2, 1]
         elif energy < 0.5:
             pool    = (DAVIS_TRANSITIONAL + BBOY_TOPROCK +
                        HILLGROVE_FORMAL[:2] + DAVIS_DRAMATIC[:1])
@@ -1293,8 +1293,31 @@ class BeatTracker:
         return ((t - self.phase_anchor) / beat_period) % 1.0
 
 
-beat_tracker = BeatTracker()
-dance_state  = DanceState(rng)
+class EnergyTracker:
+    """Normalizes raw energy to 0..1 against a recent observation window."""
+    def __init__(self, window_frames: int = 150) -> None:  # ~5 s at 30 fps
+        self.window      = window_frames
+        self.recent:     list[float] = []
+        self.cached_min  = 0.0
+        self.cached_max  = 0.1
+
+    def update_and_normalize(self, raw_energy: float) -> float:
+        self.recent.append(raw_energy)
+        if len(self.recent) > self.window:
+            self.recent.pop(0)
+        if len(self.recent) >= 30 and len(self.recent) % 30 == 0:
+            self.cached_min = min(self.recent)
+            self.cached_max = max(max(self.recent), self.cached_min + 0.01)
+        if self.cached_max > self.cached_min:
+            norm = (raw_energy - self.cached_min) / (self.cached_max - self.cached_min)
+        else:
+            norm = 0.5
+        return max(0.0, min(1.0, norm))
+
+
+beat_tracker   = BeatTracker()
+energy_tracker = EnergyTracker()
+dance_state    = DanceState(rng)
 
 # ── Smoothed audio band state ──────────────────────────────────────────────────
 lag_state = {"bass": 0.0, "mid": 0.0, "high": 0.0}
@@ -1750,9 +1773,12 @@ while True:
 
     beat_phase = beat_tracker.beat_phase(t_sec)
 
+    # Normalize energy every frame; use normalized value for move selection
+    normalized_energy = energy_tracker.update_and_normalize(feat["energy"])
+
     # Detect beat crossing — reset travel accumulator for clean delta tracking
     if beat_phase < prev_beat_phase:
-        dance_state.on_new_beat(feat["energy"])
+        dance_state.on_new_beat(normalized_energy)
         prev_t = 0.0
     prev_beat_phase = beat_phase
 
@@ -1824,7 +1850,7 @@ while True:
             f"[stick_figure_dance] frame {frame_idx}"
             f"  fps={fps_r:.1f}"
             f"  bpm={beat_tracker.bpm:.1f}  ph={beat_phase:.2f}"
-            f"  E={feat['energy']:.3f}"
+            f"  E={feat['energy']:.3f}(n={normalized_energy:.2f})"
             f"  B={lag_state['bass']:.3f} M={lag_state['mid']:.3f}"
             f"  move={dance_state.current_move}[{dance_state.move_beat}]"
             f"  rx_off={root_x_offset:+.0f}  ry_off={root_y_offset:+.0f}",
