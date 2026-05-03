@@ -94,7 +94,7 @@ WIDTH="${RESOLUTION%x*}"
 HEIGHT="${RESOLUTION#*x}"
 
 # ── Job dir ───────────────────────────────────────────────────────────────────
-JOB_DIR=$(mktemp -d /tmp/abstrakt_XXXXXXXX)
+JOB_DIR=$(mktemp -d "${ABSTRAKT_TMPDIR:-/tmp}/abstrakt_XXXXXXXX")
 cleanup() {
   if [[ "$KEEP_TMP" = "0" ]]; then
     rm -rf "$JOB_DIR"
