@@ -73,6 +73,11 @@ SHARPEN_FACTOR = float(os.environ.get("KSTACK_SHARPEN_FACTOR", 2.0))
 INK_THRESHOLD = int(os.environ.get("KSTACK_INK_THRESHOLD",   40))
 INK_OPACITY   = int(os.environ.get("KSTACK_INK_OPACITY",    255))
 
+# When set to 1, skips strings rendering (two-pass 4K pipeline renders strings
+# separately at native 4K via strings_overlay_4k_offline.py).  Additive — all
+# existing behaviour is preserved when this is 0 or unset.
+DISABLE_STRINGS = int(os.environ.get("KSTACK_DISABLE_STRINGS", 0))
+
 # ── Layer 3: speaker grid ──────────────────────────────────────────────────────
 SPK_COLS            = max(4, LOW_RES_W // 140)
 SPK_ROWS            = max(3, LOW_RES_H // 100)
@@ -639,11 +644,11 @@ while True:
     screen.blit(layer1_canvas, (0, 0))
 
     layer2 = _kaleido_n(lr_surf, KALEIDO_N)
+    layer2 = pygame.transform.scale(layer2, (WIDTH, HEIGHT))
+    layer2 = _sharpen_pass(layer2)
     _chroma_key(layer2, 30)
     _hue_shift_inplace(layer2, 0.5)
     _apply_opacity(layer2, LAYER_ALPHA)
-    layer2 = pygame.transform.scale(layer2, (WIDTH, HEIGHT))
-    layer2 = _sharpen_pass(layer2)
     screen.blit(layer2, (0, 0))
 
     # ── Layer 3: speaker grid (280p → upscale → contrast crush) ───────────────
@@ -695,11 +700,11 @@ while True:
         )
 
     layer3 = _kaleido_n(spk_surf, KALEIDO_N)
+    layer3 = pygame.transform.scale(layer3, (WIDTH, HEIGHT))
+    layer3 = _sharpen_pass(layer3)
     _chroma_key(layer3, 200)
     _colorize_inplace(layer3, beat_phase)
     _apply_opacity(layer3, LAYER_ALPHA)
-    layer3 = pygame.transform.scale(layer3, (WIDTH, HEIGHT))
-    layer3 = _sharpen_pass(layer3)
 
     if center_pulse > 1.005:
         new_w = int(WIDTH  * center_pulse)
@@ -712,26 +717,27 @@ while True:
         screen.blit(layer3, (0, 0))
 
     # ── Layer 4: guitar strings (full canvas — sharp linework) ────────────────
-    for ss in str_strings:
-        _step_string(ss)
-        ss.history.appendleft(ss.displacement.copy())
+    if not DISABLE_STRINGS:
+        for ss in str_strings:
+            _step_string(ss)
+            ss.history.appendleft(ss.displacement.copy())
 
-    if bass > STR_BASS_THRESHOLD and t_now - _str_last_pluck > STR_PLUCK_COOLDOWN:
-        n_pl  = str_rng.randint(1, min(3, len(str_strings)))
-        pl_ix = str_rng.sample(range(len(str_strings)), n_pl)
-        for ix in pl_ix:
-            _pluck_string(str_strings[ix], bass, str_rng)
-            _emit_str_sparks(str_strings[ix], str_sparks, str_rng.randint(2, 4), str_rng)
-        _str_last_pluck = t_now
+        if bass > STR_BASS_THRESHOLD and t_now - _str_last_pluck > STR_PLUCK_COOLDOWN:
+            n_pl  = str_rng.randint(1, min(3, len(str_strings)))
+            pl_ix = str_rng.sample(range(len(str_strings)), n_pl)
+            for ix in pl_ix:
+                _pluck_string(str_strings[ix], bass, str_rng)
+                _emit_str_sparks(str_strings[ix], str_sparks, str_rng.randint(2, 4), str_rng)
+            _str_last_pluck = t_now
 
-    for sp in str_sparks:
-        sp.x  += sp.vx
-        sp.y  += sp.vy
-        sp.vy += 0.1 * _STR_RES_SCALE
-        sp.life -= 0.04
-    str_sparks[:] = [sp for sp in str_sparks if sp.life > 0]
+        for sp in str_sparks:
+            sp.x  += sp.vx
+            sp.y  += sp.vy
+            sp.vy += 0.1 * _STR_RES_SCALE
+            sp.life -= 0.04
+        str_sparks[:] = [sp for sp in str_sparks if sp.life > 0]
 
-    render_strings(screen, str_strings, str_sparks)
+        render_strings(screen, str_strings, str_sparks)
 
     # ── Ink overlay (composite → Sobel edges → black line layer) ─────────────
     # Applied after strings, before pipe — so frei0r kaleido folds the inked
