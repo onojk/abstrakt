@@ -45,13 +45,22 @@ SCALE_MIN      = 0.5
 SCALE_MAX      = 2.0
 ROTATION_SPEED = 1.5
 
+# ── Low-res render budget (image layers 1/2/3) ────────────────────────────────
+# All image layers render at fixed 720p, then upscale to canvas + contrast crush.
+# At 4K the pixel work is 9× cheaper (9M vs 83M pixels). Strings (Layer 4) stay
+# at full canvas resolution — sharp linework where softness compounds.
+LOW_RES_W = 854
+LOW_RES_H = 480
+SHARPEN_PASSES = 3
+SHARPEN_FACTOR = 2.0
+
 # ── Layer 3: speaker grid ──────────────────────────────────────────────────────
-SPK_COLS            = max(6, WIDTH  // 200)
-SPK_ROWS            = max(4, HEIGHT // 200)
+SPK_COLS            = max(6, LOW_RES_W // 200)
+SPK_ROWS            = max(4, LOW_RES_H // 200)
 NUM_SPEAKERS        = SPK_COLS * SPK_ROWS
 NUM_RINGS           = 8
-RING_SPACING        = 2
-BASE_CONE_RADIUS    = 10
+RING_SPACING        = max(1, round(2  * LOW_RES_H / HEIGHT))
+BASE_CONE_RADIUS    = max(3, round(10 * LOW_RES_H / HEIGHT))
 BEAT_THRESHOLD_MULT = 3.3
 ENERGY_HISTORY_LEN  = 43
 INVERSION_DURATION  = 0.3
@@ -340,6 +349,22 @@ def _apply_opacity(surf: pygame.Surface, opacity: int) -> None:
     del alpha
 
 
+def _sharpen_pass(surf: pygame.Surface, passes: int = SHARPEN_PASSES,
+                  factor: float = SHARPEN_FACTOR) -> pygame.Surface:
+    """Contrast crush on RGB in-place (alpha untouched). Each pass:
+    pixel = (pixel - 128) * factor + 128, clipped. 3× factor=2.0 compounds
+    to ~8× effective contrast — turns upscaling softness into pixel-art hardness.
+    Returns surf for chained assignment."""
+    arr = pygame.surfarray.pixels3d(surf)
+    arr_f = arr.astype(np.float32)
+    for _ in range(passes):
+        arr_f = (arr_f - 128.0) * factor + 128.0
+        np.clip(arr_f, 0, 255, out=arr_f)
+    arr[:] = arr_f.astype(np.uint8)
+    del arr
+    return surf
+
+
 # ── String physics helpers (ported from clusters_with_strings_offline) ─────────
 def _make_string_fixed(idx: int, srng: _rnd.Random) -> StrObj:
     """Create a horizontally-fixed string at evenly-spaced vertical position."""
@@ -478,20 +503,20 @@ _bass_cutoff = max(1, int(200.0 / (RATE / N_FFT)))
 
 # ── pygame init + mandala startup ─────────────────────────────────────────────
 pygame.init()
-screen   = pygame.Surface((WIDTH, HEIGHT))
-layer1   = pygame.Surface((WIDTH, HEIGHT))
-spk_surf = pygame.Surface((WIDTH, HEIGHT))
-_GHOST_SURF = pygame.Surface((WIDTH, HEIGHT))
+screen      = pygame.Surface((WIDTH, HEIGHT))
+lr_surf     = pygame.Surface((LOW_RES_W, LOW_RES_H))   # shared low-res scratch (Layers 1 & 2)
+spk_surf    = pygame.Surface((LOW_RES_W, LOW_RES_H))   # Layer 3 speaker grid (low-res)
+_GHOST_SURF = pygame.Surface((WIDTH, HEIGHT))           # Layer 4 string ghosts (full canvas)
 _GHOST_SURF.set_colorkey((0, 0, 0))
 
 seed    = audio_hash_seed(AUDIO_FILE)
 print(f"[kaleido_stack] generating mandala (seed={seed & 0xFFFF:04x}…)", flush=True)
-mandala = generate_mandala(WIDTH, HEIGHT, seed)
+mandala = generate_mandala(LOW_RES_W, LOW_RES_H, seed)
 print(f"[kaleido_stack] mandala ready", flush=True)
 
 
 # ── Speaker state ─────────────────────────────────────────────────────────────
-speaker_positions = _grid_positions(SPK_COLS, SPK_ROWS, WIDTH, HEIGHT)
+speaker_positions = _grid_positions(SPK_COLS, SPK_ROWS, LOW_RES_W, LOW_RES_H)
 scaling_factors   = {i: 1.0   for i in range(NUM_SPEAKERS)}
 target_scales     = {i: 1.0   for i in range(NUM_SPEAKERS)}
 inversion_states  = {i: False for i in range(NUM_SPEAKERS)}
@@ -559,26 +584,30 @@ while True:
     target_pulse = 1.0 + CENTER_PULSE_GAIN * bass
     center_pulse = center_pulse * CENTER_PULSE_DECAY + target_pulse * CENTER_PULSE_RATE
 
-    # ── Layers 1 & 2: warped mandala ──────────────────────────────────────────
+    # ── Layers 1 & 2: warped mandala (low-res → upscale → contrast crush) ────────
     scale_factor   = max(SCALE_MIN, min(SCALE_MAX, SCALE_MIN + avg_amp * (SCALE_MAX - SCALE_MIN) * 2))
     rotation_angle = (rotation_angle + ROTATION_SPEED * (1.0 + 2.0 * bass)) % 360.0
-    offset_x       = int(math.sin(t_now * 5.0) * avg_amp * 300)
-    offset_y       = int(math.cos(t_now * 5.0) * avg_amp * 300)
+    lr_off_x = int(math.sin(t_now * 5.0) * avg_amp * 300 * LOW_RES_W / WIDTH)
+    lr_off_y = int(math.cos(t_now * 5.0) * avg_amp * 300 * LOW_RES_H / HEIGHT)
 
     warped = pygame.transform.rotozoom(mandala, rotation_angle, scale_factor)
-    w_rect = warped.get_rect(center=(WIDTH // 2 + offset_x, HEIGHT // 2 + offset_y))
+    w_rect = warped.get_rect(center=(LOW_RES_W // 2 + lr_off_x, LOW_RES_H // 2 + lr_off_y))
 
-    layer1.fill((0, 0, 0))
-    layer1.blit(warped, w_rect)
+    lr_surf.fill((0, 0, 0))
+    lr_surf.blit(warped, w_rect)
 
+    layer1_canvas = pygame.transform.scale(lr_surf, (WIDTH, HEIGHT))
+    layer1_canvas = _sharpen_pass(layer1_canvas)
     screen.fill((0, 0, 0))
-    screen.blit(layer1, (0, 0))                    # Layer 1 — 100% opacity
+    screen.blit(layer1_canvas, (0, 0))             # Layer 1 — 100% opacity, pixel-art sharpened
 
-    layer2 = _kaleido_n(layer1, KALEIDO_N)         # SRCALPHA, WIDTH×HEIGHT
+    layer2 = _kaleido_n(lr_surf, KALEIDO_N)        # SRCALPHA, LOW_RES_W×LOW_RES_H
     _chroma_key(layer2, 30)
     _hue_shift_inplace(layer2, 0.5)
     _apply_opacity(layer2, LAYER_ALPHA)
-    screen.blit(layer2, (0, 0))                    # Layer 2 — 40% opacity
+    layer2 = pygame.transform.scale(layer2, (WIDTH, HEIGHT))  # upscale to canvas
+    layer2 = _sharpen_pass(layer2)
+    screen.blit(layer2, (0, 0))                    # Layer 2 — 40% opacity, pixel-art sharpened
 
     # ── Layer 3: speaker grid ──────────────────────────────────────────────────
     band_energies = get_frequency_bands(spectrum, RATE, num_bands=NUM_SPEAKERS)
@@ -630,16 +659,18 @@ while True:
             list(trail_history[i]),
         )
 
-    layer3 = _kaleido_n(spk_surf, KALEIDO_N)       # SRCALPHA, WIDTH×HEIGHT
+    layer3 = _kaleido_n(spk_surf, KALEIDO_N)       # SRCALPHA, LOW_RES_W×LOW_RES_H
     _chroma_key(layer3, 200)
     _colorize_inplace(layer3, beat_phase)
     _apply_opacity(layer3, LAYER_ALPHA)
+    layer3 = pygame.transform.scale(layer3, (WIDTH, HEIGHT))   # upscale to canvas
+    layer3 = _sharpen_pass(layer3)
 
-    # Center-pulse blit (Change 1): scale layer 3 around the canvas center.
+    # Center-pulse blit: scale layer 3 around the canvas center.
     if center_pulse > 1.005:
         new_w = int(WIDTH  * center_pulse)
         new_h = int(HEIGHT * center_pulse)
-        layer3_pulsed = pygame.transform.smoothscale(layer3, (new_w, new_h))
+        layer3_pulsed = pygame.transform.scale(layer3, (new_w, new_h))
         ox = (WIDTH  - new_w) // 2
         oy = (HEIGHT - new_h) // 2
         screen.blit(layer3_pulsed, (ox, oy))        # Layer 3 — 40% opacity + pulse
