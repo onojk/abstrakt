@@ -21,7 +21,9 @@ JOBS_DIR    = os.path.join(REPO_ROOT, "jobs")
 # ── Config ────────────────────────────────────────────────────────────────────
 RESOLUTION_PRESETS = {
     "480p":  {"width": 852,  "height": 480,  "crf": 32, "preset": "ultrafast", "fps": 24},
+    "720p":  {"width": 1280, "height": 720,  "crf": 22, "preset": "fast",      "fps": 30},
     "1080p": {"width": 1920, "height": 1080, "crf": 18, "preset": "medium",    "fps": 30},
+    "4K":    {"width": 3840, "height": 2160, "crf": 20, "preset": "medium",    "fps": 30},
 }
 
 KALEIDO_DEFAULTS = {
