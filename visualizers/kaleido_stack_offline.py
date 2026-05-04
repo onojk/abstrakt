@@ -3,7 +3,7 @@
 # Layer 1 (100%): warped procedural mandala (audio-reactive scale/rotate/translate).
 # Layer 2 (40%): same mandala → N=6 kaleido → chroma key → hue shift +180°.
 # Layer 3 (40%): speaker grid → N=6 kaleido → chroma key → rainbow colorize
-#                + center-pulse scale on beat (0.25 magnitude; tune up/down as needed).
+#                + center-pulse scale on beat (gain=1.0 → up to 2× canvas on bass peak).
 # Layer 4 (100%): 6 fat guitar strings — wave physics, bass-pluck, anti-node sparks.
 #                 Rendered BEFORE the frei0r 12-wedge kaleido (abstrakt.sh --apply-kden)
 #                 so strings fold into 72 radiating string-spokes around the mandala.
@@ -55,16 +55,16 @@ BASE_CONE_RADIUS    = 10
 BEAT_THRESHOLD_MULT = 3.3
 ENERGY_HISTORY_LEN  = 43
 INVERSION_DURATION  = 0.3
-SCALE_SPEED         = 0.25   # was 0.1 — faster attack for more visible response
+SCALE_SPEED         = 0.5    # was 0.25 — fast enough to actually reach 10× targets
 TRAIL_LENGTH        = 30
 TRAIL_ALPHA_DECAY   = 60
 SPK_BG              = (0, 0, 0)   # black so chroma key works after kaleido
 
-# center-pulse magnitude: how much layer 3 swells on bass peaks (0–1 range; 0.25
-# gives ~25% size boost at full bass). Tune down if too aggressive, up if too subtle.
-CENTER_PULSE_GAIN  = 0.25
-CENTER_PULSE_DECAY = 0.85   # smoothing (0=instant, 1=no change)
-CENTER_PULSE_RATE  = 0.15   # blending rate toward target
+# center-pulse magnitude: how much layer 3 swells on bass peaks (0–1 range).
+# 1.0 → peak = 2.0× canvas; edges clip beyond viewport on heavy bass.
+CENTER_PULSE_GAIN  = 1.0
+CENTER_PULSE_DECAY = 0.7    # faster decay for sharper visible snap on peaks
+CENTER_PULSE_RATE  = 0.3    # faster attack so peaks register before energy fades
 
 # ── Layer 4: guitar strings ────────────────────────────────────────────────────
 N_STRINGS           = 6
@@ -516,8 +516,7 @@ while True:
     t_now      = frame_idx / FPS
     beat_phase = (beat_phase + 1.0 / 120.0) % 1.0
 
-    # Center-pulse (Change 1): layer 3 swells 0–25% on bass peaks.
-    # CENTER_PULSE_GAIN=0.25 is the starting point — tune up/down after watching.
+    # Center-pulse: layer 3 scales up to 2× canvas on bass peaks; edges clip viewport.
     target_pulse = 1.0 + CENTER_PULSE_GAIN * bass
     center_pulse = center_pulse * CENTER_PULSE_DECAY + target_pulse * CENTER_PULSE_RATE
 
@@ -556,8 +555,8 @@ while True:
             rings_inv_states[i] = True
             rings_inv_timers[i] = INVERSION_DURATION
             # Change 2: speaker scale 3× more aggressive; cap at 5× to stay on canvas.
-            # The 3.0 multiplier and 5.0 cap are starting points — tune after watching.
-            target_scales[i] = min(5.0, 1.0 + 3.0 * min(1.0, e * 1.5))
+            # 10× peak: base 10px → ~100px diameter on heavy band energy.
+            target_scales[i] = min(10.0, 1.0 + 9.0 * min(1.0, e * 1.5))
         else:
             target_scales[i] = max(1.0, target_scales[i] - 0.05)
 
