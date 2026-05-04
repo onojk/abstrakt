@@ -73,6 +73,8 @@ PLUCK_AMP           = float(os.environ.get("STRINGS_PLUCK_AMP", 30.0))
 _STR_RES_SCALE      = HEIGHT / 720.0
 STR_BASS_THRESHOLD  = 0.4    # normalized bass level that triggers a pluck
 STR_PLUCK_COOLDOWN  = 0.15   # seconds between pluck events
+TRAIL_FRAMES        = 60    # frames of displacement history per string
+TRAIL_RATE          = 3     # render every Nth ghost (≤20 ghosts per string)
 
 STRING_BODY_COLORS = [
     (255, 240, 100),   # gold
@@ -389,6 +391,20 @@ def _string_point(s: StrObj, i: int) -> tuple:
     return rx + px * d, ry + py * d
 
 
+def _ghost_ipts(s: StrObj, disp: np.ndarray) -> list:
+    """Vectorized screen-point computation for an arbitrary displacement array."""
+    dx, dy = s.x1 - s.x0, s.y1 - s.y0
+    length = math.hypot(dx, dy)
+    if length < 1e-6:
+        return [(int(s.x0), int(s.y0))] * N_POINTS_PER_STRING
+    ux, uy = dx / length, dy / length
+    px, py = -uy, ux
+    t  = np.linspace(0.0, 1.0, N_POINTS_PER_STRING)
+    xs = (s.x0 + dx * t + px * disp).astype(np.int32)
+    ys = (s.y0 + dy * t + py * disp).astype(np.int32)
+    return list(zip(xs.tolist(), ys.tolist()))
+
+
 def _emit_str_sparks(s: StrObj, str_sparks: list, n: int, srng: _rnd.Random) -> None:
     abs_vel = np.abs(s.velocity)
     if abs_vel.max() < 1e-6:
@@ -408,12 +424,31 @@ def render_strings(surface: pygame.Surface, str_list: list, str_sparks: list) ->
     body_w = max(4, int(6 * _STR_RES_SCALE))
     glow_w = max(8, int(10 * _STR_RES_SCALE))
     for s in str_list:
-        pts  = [_string_point(s, i) for i in range(N_POINTS_PER_STRING)]
-        ipts = [(int(x), int(y)) for x, y in pts]
+        # Ghost trails — oldest first so newer ghosts paint over older ones.
+        # Only the glow underlayer is drawn (TRAIL_GLOW_ONLY); body is skipped
+        # for ghosts to keep them visually distinct from the live string.
+        hist      = list(s.history)   # newest at index 0 (appendleft)
+        n_hist    = len(hist)
+        for gi in reversed(range(0, n_hist, TRAIL_RATE)):
+            age   = gi / TRAIL_FRAMES          # 0.0 = newest, <1.0
+            alpha = int(220 * (1.0 - age) ** 2)
+            if alpha < 4:
+                continue
+            ipts = _ghost_ipts(s, hist[gi])
+            if len(ipts) < 2:
+                continue
+            _GHOST_SURF.fill((0, 0, 0))
+            pygame.draw.lines(_GHOST_SURF, s.glow_color, False, ipts, glow_w)
+            _GHOST_SURF.set_alpha(alpha)
+            surface.blit(_GHOST_SURF, (0, 0))
+
+        # Live string — full opacity, glow + body.
+        ipts = _ghost_ipts(s, s.displacement)
         if len(ipts) < 2:
             continue
         pygame.draw.lines(surface, s.glow_color, False, ipts, glow_w)
         pygame.draw.lines(surface, s.color,      False, ipts, body_w)
+
     spark_r = max(3, int(4 * _STR_RES_SCALE))
     for sp in str_sparks:
         radius = max(1, int(sp.life * spark_r))
@@ -446,6 +481,8 @@ pygame.init()
 screen   = pygame.Surface((WIDTH, HEIGHT))
 layer1   = pygame.Surface((WIDTH, HEIGHT))
 spk_surf = pygame.Surface((WIDTH, HEIGHT))
+_GHOST_SURF = pygame.Surface((WIDTH, HEIGHT))
+_GHOST_SURF.set_colorkey((0, 0, 0))
 
 seed    = audio_hash_seed(AUDIO_FILE)
 print(f"[kaleido_stack] generating mandala (seed={seed & 0xFFFF:04x}…)", flush=True)
@@ -471,6 +508,8 @@ band_energies     = [0.0] * NUM_SPEAKERS
 # the mandala's RNG sequence.
 str_rng     = _rnd.Random(seed + 1)
 str_strings = [_make_string_fixed(i, str_rng) for i in range(N_STRINGS)]
+for _ss in str_strings:
+    _ss.history: deque = deque(maxlen=TRAIL_FRAMES)
 str_sparks: list = []
 _str_last_pluck  = 0.0
 
@@ -611,6 +650,7 @@ while True:
     # Physics step every frame (wave equation, fixed-endpoint BCs)
     for ss in str_strings:
         _step_string(ss)
+        ss.history.appendleft(ss.displacement.copy())
 
     # Bass-driven plucking with global cooldown
     if bass > STR_BASS_THRESHOLD and t_now - _str_last_pluck > STR_PLUCK_COOLDOWN:
