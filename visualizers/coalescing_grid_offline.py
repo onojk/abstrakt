@@ -71,7 +71,7 @@ for row in range(NUM_ROWS):
         y = row * GRID_SPACING + GRID_SPACING // 2
         dots.append({
             "pos":            [float(x), float(y)],
-            "speed_mult":     0.1,
+            "speed_mult":     0.5,
             "scatter_target": None,
             "color":          DEFAULT_DOT_COLOR,
         })
@@ -158,7 +158,7 @@ alpha = Alpha()
 STATE             = "coalescing"
 state_start_frame = 0
 cumulative_bass   = 0.0
-# Speed ramp: every 10s during coalescing, globally (matches original)
+# Speed ramp: every 3s globally (tuned for 30-second renders; original was 10s)
 last_speedup_frame = 0
 
 
@@ -218,10 +218,10 @@ while True:
     alpha.update(frame_idx, bass)
     alpha_r = alpha.pulse_radius(frame_idx)
 
-    # ── Speed ramp (global, matches original) ──────────────────────────────────
-    if (frame_idx - last_speedup_frame) >= 10 * FPS:
+    # ── Speed ramp (global) ────────────────────────────────────────────────────
+    if (frame_idx - last_speedup_frame) >= 3 * FPS:
         for dot in dots:
-            dot["speed_mult"] = min(0.95, dot["speed_mult"] + 0.1)
+            dot["speed_mult"] = min(0.95, dot["speed_mult"] + 0.15)
         last_speedup_frame = frame_idx
 
     # ── Dot update & draw ──────────────────────────────────────────────────────
