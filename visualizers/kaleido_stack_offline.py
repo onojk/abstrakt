@@ -77,20 +77,20 @@ TRAIL_FRAMES        = 60    # frames of displacement history per string
 TRAIL_RATE          = 3     # render every Nth ghost (≤20 ghosts per string)
 
 STRING_BODY_COLORS = [
-    (255, 240, 100),   # gold
-    (255, 200,  50),   # amber
-    (255, 100, 100),   # red
-    (255,  50, 200),   # magenta
-    (100, 220, 255),   # cyan
-    (200, 255, 100),   # lime
+    (255, 250, 240),   # warm white (floral white)
+    (250, 250, 245),   # neutral white (off-white)
+    (245, 250, 255),   # cool white (alice blue)
+    (255, 248, 235),   # cream (cream-ivory)
+    (240, 248, 250),   # silver-white (very cool)
+    (252, 245, 240),   # peach-white (pale warm)
 ]
 STRING_GLOW_COLORS = [
-    (180, 160,  50),
-    (180, 140,  30),
-    (180,  60,  60),
-    (180,  30, 130),
-    ( 60, 140, 180),
-    (130, 180,  60),
+    (153, 150, 144),   # warm gray
+    (150, 150, 147),   # neutral gray
+    (147, 150, 153),   # cool gray
+    (153, 149, 141),   # cream gray
+    (144, 149, 150),   # silver gray
+    (151, 147, 144),   # peach gray
 ]
 
 # ── Compositing ────────────────────────────────────────────────────────────────
