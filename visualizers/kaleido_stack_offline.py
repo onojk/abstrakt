@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-# kaleido_stack_offline.py — Three-layer composite visualizer.
+# kaleido_stack_offline.py — Four-layer composite visualizer.
 # Layer 1 (100%): warped procedural mandala (audio-reactive scale/rotate/translate).
 # Layer 2 (40%): same mandala → N=6 kaleido → chroma key → hue shift +180°.
-# Layer 3 (40%): speaker grid → N=6 kaleido → chroma key → rainbow colorize.
+# Layer 3 (40%): speaker grid → N=6 kaleido → chroma key → rainbow colorize
+#                + center-pulse scale on beat (0.25 magnitude; tune up/down as needed).
+# Layer 4 (100%): 6 fat guitar strings — wave physics, bass-pluck, anti-node sparks.
+#                 Rendered BEFORE the frei0r 12-wedge kaleido (abstrakt.sh --apply-kden)
+#                 so strings fold into 72 radiating string-spokes around the mandala.
 # Mandala seeded from SHA256(first 4KB of audio) — deterministic per song.
-# Expected: ~15–40 fps at 720p; < 5 fps at 4K (12 rotozoom ops per frame).
+# Expected: ~10–14 fps at 480p; ~6–9 fps at 720p.
 
 from __future__ import annotations
 
@@ -18,6 +22,7 @@ import sys
 import time
 import wave
 from collections import deque
+from dataclasses import dataclass
 
 import numpy as np
 import pygame
@@ -50,10 +55,41 @@ BASE_CONE_RADIUS    = 10
 BEAT_THRESHOLD_MULT = 3.3
 ENERGY_HISTORY_LEN  = 43
 INVERSION_DURATION  = 0.3
-SCALE_SPEED         = 0.1
+SCALE_SPEED         = 0.25   # was 0.1 — faster attack for more visible response
 TRAIL_LENGTH        = 30
 TRAIL_ALPHA_DECAY   = 60
 SPK_BG              = (0, 0, 0)   # black so chroma key works after kaleido
+
+# center-pulse magnitude: how much layer 3 swells on bass peaks (0–1 range; 0.25
+# gives ~25% size boost at full bass). Tune down if too aggressive, up if too subtle.
+CENTER_PULSE_GAIN  = 0.25
+CENTER_PULSE_DECAY = 0.85   # smoothing (0=instant, 1=no change)
+CENTER_PULSE_RATE  = 0.15   # blending rate toward target
+
+# ── Layer 4: guitar strings ────────────────────────────────────────────────────
+N_STRINGS           = 6
+N_POINTS_PER_STRING = 80
+PLUCK_AMP           = float(os.environ.get("STRINGS_PLUCK_AMP", 30.0))
+_STR_RES_SCALE      = HEIGHT / 720.0
+STR_BASS_THRESHOLD  = 0.4    # normalized bass level that triggers a pluck
+STR_PLUCK_COOLDOWN  = 0.15   # seconds between pluck events
+
+STRING_BODY_COLORS = [
+    (255, 240, 100),   # gold
+    (255, 200,  50),   # amber
+    (255, 100, 100),   # red
+    (255,  50, 200),   # magenta
+    (100, 220, 255),   # cyan
+    (200, 255, 100),   # lime
+]
+STRING_GLOW_COLORS = [
+    (180, 160,  50),
+    (180, 140,  30),
+    (180,  60,  60),
+    (180,  30, 130),
+    ( 60, 140, 180),
+    (130, 180,  60),
+]
 
 # ── Compositing ────────────────────────────────────────────────────────────────
 KALEIDO_N   = 6
@@ -61,9 +97,27 @@ LAYER_ALPHA = 102   # 40% opacity (102/255 ≈ 0.40)
 
 print(
     f"[kaleido_stack] {WIDTH}x{HEIGHT} @ {FPS}fps  "
-    f"spk={SPK_COLS}×{SPK_ROWS}={NUM_SPEAKERS}",
+    f"spk={SPK_COLS}×{SPK_ROWS}={NUM_SPEAKERS}  strings={N_STRINGS}",
     flush=True,
 )
+
+
+# ── Strings dataclasses ────────────────────────────────────────────────────────
+@dataclass
+class StrObj:
+    x0: float; y0: float; x1: float; y1: float
+    displacement: "np.ndarray"
+    velocity:     "np.ndarray"
+    color:        tuple
+    glow_color:   tuple
+    wave_speed:   float
+    damping:      float
+    life:         float = 1.0
+
+@dataclass
+class StrSpark:
+    x: float; y: float; vx: float; vy: float
+    color: tuple; life: float
 
 
 # ── Audio hash + mandala ───────────────────────────────────────────────────────
@@ -284,6 +338,88 @@ def _apply_opacity(surf: pygame.Surface, opacity: int) -> None:
     del alpha
 
 
+# ── String physics helpers (ported from clusters_with_strings_offline) ─────────
+def _make_string_fixed(idx: int, srng: _rnd.Random) -> StrObj:
+    """Create a horizontally-fixed string at evenly-spaced vertical position."""
+    y    = HEIGHT * (idx + 1) / (N_STRINGS + 1)
+    col  = STRING_BODY_COLORS[idx % len(STRING_BODY_COLORS)]
+    glow = STRING_GLOW_COLORS[idx % len(STRING_GLOW_COLORS)]
+    return StrObj(
+        x0=0.0, y0=y, x1=float(WIDTH), y1=y,
+        displacement=np.zeros(N_POINTS_PER_STRING, dtype=np.float32),
+        velocity=np.zeros(N_POINTS_PER_STRING, dtype=np.float32),
+        color=col, glow_color=glow,
+        wave_speed=srng.uniform(0.35, 0.75),
+        damping=srng.uniform(0.993, 0.997),
+    )
+
+
+def _step_string(s: StrObj) -> None:
+    d         = s.displacement
+    lap       = np.zeros_like(d)
+    lap[1:-1] = d[2:] - 2 * d[1:-1] + d[:-2]
+    s.velocity     = (s.velocity + s.wave_speed ** 2 * lap) * s.damping
+    s.displacement = s.displacement + s.velocity
+    s.displacement[0] = s.displacement[-1] = 0.0
+    s.velocity[0]     = s.velocity[-1]     = 0.0
+
+
+def _pluck_string(s: StrObj, energy: float, srng: _rnd.Random) -> None:
+    pos   = srng.randint(N_POINTS_PER_STRING // 4, 3 * N_POINTS_PER_STRING // 4)
+    width = N_POINTS_PER_STRING // 8
+    amp   = energy * PLUCK_AMP * _STR_RES_SCALE
+    idx   = np.arange(N_POINTS_PER_STRING, dtype=np.float32)
+    bump  = amp * np.exp(-((idx - pos) ** 2) / (2 * width ** 2))
+    if srng.random() < 0.5:
+        bump = -bump
+    s.velocity += bump
+
+
+def _string_point(s: StrObj, i: int) -> tuple:
+    dx, dy = s.x1 - s.x0, s.y1 - s.y0
+    length = math.hypot(dx, dy)
+    if length < 1e-6:
+        return s.x0, s.y0
+    ux, uy = dx / length, dy / length
+    px, py = -uy, ux
+    t  = i / (N_POINTS_PER_STRING - 1)
+    rx = s.x0 + dx * t
+    ry = s.y0 + dy * t
+    d  = float(s.displacement[i])
+    return rx + px * d, ry + py * d
+
+
+def _emit_str_sparks(s: StrObj, str_sparks: list, n: int, srng: _rnd.Random) -> None:
+    abs_vel = np.abs(s.velocity)
+    if abs_vel.max() < 1e-6:
+        return
+    top_i = np.argpartition(abs_vel, -min(n, N_POINTS_PER_STRING))[-min(n, N_POINTS_PER_STRING):]
+    for i in top_i:
+        x, y = _string_point(s, int(i))
+        str_sparks.append(StrSpark(
+            x=x, y=y,
+            vx=srng.uniform(-3.0, 3.0) * _STR_RES_SCALE,
+            vy=srng.uniform(-3.0, 3.0) * _STR_RES_SCALE,
+            color=s.color, life=1.0,
+        ))
+
+
+def render_strings(surface: pygame.Surface, str_list: list, str_sparks: list) -> None:
+    body_w = max(4, int(6 * _STR_RES_SCALE))
+    glow_w = max(8, int(10 * _STR_RES_SCALE))
+    for s in str_list:
+        pts  = [_string_point(s, i) for i in range(N_POINTS_PER_STRING)]
+        ipts = [(int(x), int(y)) for x, y in pts]
+        if len(ipts) < 2:
+            continue
+        pygame.draw.lines(surface, s.glow_color, False, ipts, glow_w)
+        pygame.draw.lines(surface, s.color,      False, ipts, body_w)
+    spark_r = max(3, int(4 * _STR_RES_SCALE))
+    for sp in str_sparks:
+        radius = max(1, int(sp.life * spark_r))
+        pygame.draw.circle(surface, sp.color, (int(sp.x), int(sp.y)), radius)
+
+
 # ── WAV reader ────────────────────────────────────────────────────────────────
 _wf = wave.open(AUDIO_FILE, "rb")
 _ch = _wf.getnchannels()
@@ -330,6 +466,15 @@ energy_history: deque = deque(maxlen=ENERGY_HISTORY_LEN)
 band_energies     = [0.0] * NUM_SPEAKERS
 
 
+# ── Strings state (Layer 4) ────────────────────────────────────────────────────
+# Separate seeded RNG so string physics stays deterministic without affecting
+# the mandala's RNG sequence.
+str_rng     = _rnd.Random(seed + 1)
+str_strings = [_make_string_fixed(i, str_rng) for i in range(N_STRINGS)]
+str_sparks: list = []
+_str_last_pluck  = 0.0
+
+
 # ── ffmpeg writer (video-only; abstrakt.sh handles audio mux) ─────────────────
 _proc = subprocess.Popen(
     [
@@ -349,6 +494,7 @@ frame_idx      = 0
 dt             = 1.0 / FPS
 rotation_angle = 0.0
 beat_phase     = 0.0
+center_pulse   = 1.0   # smoothed scale multiplier for layer 3 (Change 1)
 render_start   = time.time()
 window_start   = render_start
 window_frames  = 0
@@ -369,6 +515,11 @@ while True:
 
     t_now      = frame_idx / FPS
     beat_phase = (beat_phase + 1.0 / 120.0) % 1.0
+
+    # Center-pulse (Change 1): layer 3 swells 0–25% on bass peaks.
+    # CENTER_PULSE_GAIN=0.25 is the starting point — tune up/down after watching.
+    target_pulse = 1.0 + CENTER_PULSE_GAIN * bass
+    center_pulse = center_pulse * CENTER_PULSE_DECAY + target_pulse * CENTER_PULSE_RATE
 
     # ── Layers 1 & 2: warped mandala ──────────────────────────────────────────
     scale_factor   = max(SCALE_MIN, min(SCALE_MAX, SCALE_MIN + avg_amp * (SCALE_MAX - SCALE_MIN) * 2))
@@ -404,7 +555,9 @@ while True:
             inversion_timers[i] = INVERSION_DURATION
             rings_inv_states[i] = True
             rings_inv_timers[i] = INVERSION_DURATION
-            target_scales[i]    = min(2.0, 1.0 + e * 1.5)
+            # Change 2: speaker scale 3× more aggressive; cap at 5× to stay on canvas.
+            # The 3.0 multiplier and 5.0 cap are starting points — tune after watching.
+            target_scales[i] = min(5.0, 1.0 + 3.0 * min(1.0, e * 1.5))
         else:
             target_scales[i] = max(1.0, target_scales[i] - 0.05)
 
@@ -443,7 +596,43 @@ while True:
     _chroma_key(layer3, 200)
     _colorize_inplace(layer3, beat_phase)
     _apply_opacity(layer3, LAYER_ALPHA)
-    screen.blit(layer3, (0, 0))                    # Layer 3 — 40% opacity
+
+    # Center-pulse blit (Change 1): scale layer 3 around the canvas center.
+    if center_pulse > 1.005:
+        new_w = int(WIDTH  * center_pulse)
+        new_h = int(HEIGHT * center_pulse)
+        layer3_pulsed = pygame.transform.smoothscale(layer3, (new_w, new_h))
+        ox = (WIDTH  - new_w) // 2
+        oy = (HEIGHT - new_h) // 2
+        screen.blit(layer3_pulsed, (ox, oy))        # Layer 3 — 40% opacity + pulse
+    else:
+        screen.blit(layer3, (0, 0))                  # Layer 3 — 40% opacity (no pulse)
+
+    # ── Layer 4: guitar strings ────────────────────────────────────────────────
+    # Physics step every frame (wave equation, fixed-endpoint BCs)
+    for ss in str_strings:
+        _step_string(ss)
+
+    # Bass-driven plucking with global cooldown
+    if bass > STR_BASS_THRESHOLD and t_now - _str_last_pluck > STR_PLUCK_COOLDOWN:
+        n_pl  = str_rng.randint(1, min(3, len(str_strings)))
+        pl_ix = str_rng.sample(range(len(str_strings)), n_pl)
+        for ix in pl_ix:
+            _pluck_string(str_strings[ix], bass, str_rng)
+            _emit_str_sparks(str_strings[ix], str_sparks, str_rng.randint(2, 4), str_rng)
+        _str_last_pluck = t_now
+
+    # Spark physics (gravity + decay)
+    for sp in str_sparks:
+        sp.x  += sp.vx
+        sp.y  += sp.vy
+        sp.vy += 0.1 * _STR_RES_SCALE
+        sp.life -= 0.04
+    str_sparks[:] = [sp for sp in str_sparks if sp.life > 0]
+
+    # Render strings on top of the mandala composite (abstrakt.sh --apply-kden
+    # will fold the entire frame — including strings — into the 12-wedge mandala)
+    render_strings(screen, str_strings, str_sparks)  # Layer 4 — 100% opacity
 
     _proc.stdin.write(pygame.image.tostring(screen, "RGB"))
 
@@ -456,8 +645,9 @@ while True:
             f"[kaleido_stack] frame {frame_idx}"
             f"  fps={fps_r:.1f}"
             f"  beat_phase={beat_phase:.2f}"
-            f"  layer2_alpha={LAYER_ALPHA}"
-            f"  layer3_hue={beat_phase:.2f}",
+            f"  center_pulse={center_pulse:.3f}"
+            f"  layer3_hue={beat_phase:.2f}"
+            f"  sparks={len(str_sparks)}",
             flush=True,
         )
         window_start  = now
