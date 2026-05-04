@@ -35,7 +35,7 @@ KALEIDO_DEFAULTS = {
 }
 
 
-VISUALIZERS = ["warpfield", "02_kaleidoscope_spokes", "09_beat_reactive", "coalescing_grid", "plasma", "plasma_warm", "camo_plasma", "glitch_scroll", "chaos_explosions", "string_resonance", "stick_figure_dance", "clusters_with_strings", "worm_swarm"]
+VISUALIZERS = ["warpfield", "02_kaleidoscope_spokes", "09_beat_reactive", "aurora", "coalescing_grid", "plasma", "plasma_warm", "camo_plasma", "glitch_scroll", "chaos_explosions", "string_resonance", "stick_figure_dance", "clusters_with_strings", "worm_swarm"]
 
 MAX_UPLOAD_MB = 100
 
