@@ -35,7 +35,7 @@ KALEIDO_DEFAULTS = {
 }
 
 
-VISUALIZERS = ["warpfield", "02_kaleidoscope_spokes", "09_beat_reactive", "aurora", "coalescing_grid", "image_warp", "kaleido_stack", "kaleido_stack_inked", "plasma", "plasma_warm", "camo_plasma", "glitch_scroll", "chaos_explosions", "speaker_grid", "string_resonance", "stick_figure_dance", "clusters_with_strings", "worm_swarm"]
+VISUALIZERS = ["warpfield", "02_kaleidoscope_spokes", "09_beat_reactive", "aurora", "coalescing_grid", "image_warp", "kaleido_stack", "kaleido_stack_inked", "kaleido_qbist", "kaleido_qbist_strings", "plasma", "plasma_warm", "camo_plasma", "glitch_scroll", "chaos_explosions", "speaker_grid", "string_resonance", "stick_figure_dance", "clusters_with_strings", "worm_swarm"]
 
 MAX_UPLOAD_MB = 100
 
