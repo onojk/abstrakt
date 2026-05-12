@@ -6,6 +6,16 @@ Abstrakt orchestrates two parent projects — a pygame offline renderer that tur
 
 The combination matters because the audio-reactive quality of the pygame layer (FFT-driven colors, amplitude-driven shapes, beat detection) survives the symmetry transform intact. The resulting video doesn't look like a kaleidoscope filter applied to footage — it looks like the pattern was always symmetric.
 
+## Part of the abstrakt trilogy
+
+Three implementations of the same audio-reactive kaleidoscope idea, on three different stacks:
+
+- **abstrakt** (this repo) — Python + pygame visualizers piped through FFmpeg kaleidoscope post-stack. Offline 4K pipeline, Linux. The original.
+- **[abstrakt-deck](https://github.com/onojk/abstrakt-deck)** — Rust + wgpu + egui native desktop app. Real-time interactive, MIDI controllable.
+- **[abstrakt-engine](https://github.com/onojk/abstrakt-engine)** — Kotlin + OpenGL ES 3.0 Android app. 120Hz audio-reactive visualization with MP4 export. Coming to Google Play.
+
+Same aesthetic across all three: audio in, kaleidoscope mandala out. Different platforms, different tradeoffs.
+
 ## Quick start
 
 **System dependencies**
